@@ -8,6 +8,7 @@ print(datetime.now().strftime(f"%Y-%m-%dT%H:%M:%SZ"))
 date_string = '2024-12-11'
 
 
+
 # path = r'/Users/jacealloway/Desktop/python/C3/workflowexports/'
 # df1  = pd.read_csv(path + f'544593export{date_string}.csv', delimiter=',')
 # df2  = pd.read_csv(path + f'544777export{date_string}.csv', delimiter=',')
