@@ -4,20 +4,20 @@ from datetime import datetime, date
 from planningcenterauth import pcfetch
 import csv
 
-
-#set path for fetching and writing files - this will be different for each person running the code
-workflow_fetchpath = r'/Users/jacealloway/Desktop/python/C3/workflowexports/'
-writepath = r'/Users/jacealloway/Desktop/python/C3/analyzed/'
-
-
-
-
-
 #set global date variable 
 date_string = date.today()
 
-workflow_keys_df = pd.read_csv(workflow_fetchpath + f'campusexport{date_string}.csv', delimiter = ',')
-people_data_df = pd.read_csv(workflow_fetchpath + f'peopledata{date_string}.csv', delimiter = ',')
+#set path for fetching and writing files - this will be different for each person running the code
+workflow_fetchpath = r'/Users/jacealloway/Desktop/python/C3/workflowexports/'
+campuspeople_fetchpath = r'/Users/jacealloway/Desktop/python/C3/campuspeopleexports/'
+# team_fetchpath = r'Users/jacealloway/Desktop/python/C3/teamexports/' #don't need this yet
+
+#path to writing files
+writepath = r'/Users/jacealloway/Desktop/python/C3/analyzed/'
+WF_filename = f'workflows{date_string}.csv'
+
+
+people_data_df = pd.read_csv(campuspeople_fetchpath + f'peopledata{date_string}.csv', delimiter = ',')
 
 
 #get campus dictionary
@@ -29,11 +29,12 @@ WorkflowSteps_Dict = pcfetch.getWorkflowSteps(Workflow_Dict)
 
 
 #load dict of desired workflows. - try to write a way to do this automatically instead of manually
-desired_workflows={'548715': 'CREATIVE TEAM',
+desired_workflows={
+'548715': 'CREATIVE TEAM',
 # '544795': 'DT BAPTISMS',
 # '544778': 'DT CHILD DEDICATIONS',
 '564585': 'DT MAINTENANCE TEAM',
-# '544755': 'DT NEW PEOPLE FOLLOW UP',
+# '544755': 'DT NEW PEOPLE FOLLOW UP',        #FOR WINNIE
 '544593': 'DT TEAM ONBOARDING - C3 KIDS',
 '550431': 'DT TEAM ONBOARDING - CAFE',
 '550408': 'DT TEAM ONBOARDING - HOSPITALITY',
@@ -47,7 +48,7 @@ desired_workflows={'548715': 'CREATIVE TEAM',
 '544885': 'HAM TEAM ONBOARDING - SERVICE PRODUCTION',
 # '544809': 'HAMILTON BAPTISMS',
 '564649': 'HAMILTON MAINTENANCE TEAM',
-# '548180': 'HAMILTON NEW PEOPLE FOLLOW UP',
+# '548180': 'HAMILTON NEW PEOPLE FOLLOW UP',      #FOR WINNIE
 '544664': 'HAMILTON TEAM ONBOARDING - C3 KIDS',
 '550421': 'HAMILTON TEAM ONBOARDING - HOSPITALITY',
 '544725': 'HAMILTON TEAM ONBOARDING - HOSTING',
@@ -55,7 +56,7 @@ desired_workflows={'548715': 'CREATIVE TEAM',
 '544846': 'HAMILTON TEAM ONBOARDING - WORSHIP',
 # '555089': 'Love This City',
 '564646': 'MT MAINTENANCE TEAM',
-# '548148': 'MT NEW PEOPLE FOLLOW UP',
+# '548148': 'MT NEW PEOPLE FOLLOW UP',        #FOR WINNIE
 '544649': 'MT TEAM ONBOARDING - C3 KIDS',
 '550418': 'MT TEAM ONBOARDING - HOSPITALITY',
 '544718': 'MT TEAM ONBOARDING - HOSTING',
@@ -65,6 +66,10 @@ desired_workflows={'548715': 'CREATIVE TEAM',
 '550397': 'MT TEAM ONBOARDING - YOUTH',
 # '561167': 'TEST')
 }
+
+
+
+
 
 
 #not too concerned about this function
@@ -183,13 +188,13 @@ def workflowExportCSV(workflow_list: dict) -> None:
     ]
 
     try:
-        with open(writepath + f'workflows{date_string}.csv', 'w', newline='') as csvfile:
+        with open(writepath + f'{WF_filename}', 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=cols)
             writer.writeheader()
 
             for id in list(workflow_list.keys()):
                 #load export data and steps for current ID
-                workflow_data = pd.read_csv(fetchpath + f'{id}export{date_string}.csv', delimiter=',')
+                workflow_data = pd.read_csv(workflow_fetchpath + f'{id}export{date_string}.csv', delimiter=',')
                 stepslist = WorkflowSteps_Dict[f'{id}']
                 workflow_name = Workflow_Dict[f'{id}']['name']
 
@@ -218,24 +223,28 @@ def workflowExportCSV(workflow_list: dict) -> None:
 
                     for sequence in range(N-1):
                         step_name = stepslist[sequence]['name']
-                        time_initiated = str(workflow_data[f'{sequence} created at'].values[idx])
-                        time_completed = str(workflow_data[f'{sequence+1} created at'].values[idx])
-
-
-                        if pd.isnull(time_initiated) == True:
-                            time_initiated = ''
-                            time_completed = ''
-                        elif pd.isnull(time_completed) == True:
+                        try:
+                            time_initiated = str(workflow_data[f'{sequence} created at'].values[idx])
+                            time_completed = str(workflow_data[f'{sequence+1} created at'].values[idx])
+                        except KeyError:
+                            time_initiated = str(workflow_data[f'{sequence} created at'].values[idx])
                             time_completed = ''
 
 
-                        else:
-                            try:
-                                days_at_step = getTimeGap(time_initiated, time_completed)
-                            except ValueError:
-                                days_at_step = ''
-                        
-                        
+                        current_time = str(datetime.now().strftime(f"%Y-%m-%dT%H:%M:%SZ"))
+
+                        try:
+                            days_at_step = getTimeGap(time_initiated, time_completed)
+                        except ValueError:
+                            days_at_step = ''
+
+                        try:
+                            if time_completed.startswith('nan'):
+                                days_at_step = getTimeGap(time_initiated, current_time)
+                        except ValueError:
+                            days_at_step = ''
+
+
 
                         row = {
                             'full name' : name,
@@ -256,7 +265,7 @@ def workflowExportCSV(workflow_list: dict) -> None:
 
 
 
-            print(f"CSV file 'workflows{date_string}.csv' created successfully.")
+            print(f"CSV file '{WF_filename}' created successfully.")
 
     except IOError:
         print("I/O error while writing CSV.")

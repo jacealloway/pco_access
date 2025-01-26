@@ -5,6 +5,7 @@ from requests.auth import HTTPBasicAuth
 import csv
 from datetime import date
 import sys
+import time
 
 #set file variables 
 BASE_URL_SERVICES = 'https://api.planningcenteronline.com/services/v2/'
@@ -12,14 +13,6 @@ PEOPLE_BASE_URL = 'https://api.planningcenteronline.com/people/v2/people/'
 EMAIL_BASE_URL = 'https://api.planningcenteronline.com/people/v2/emails/'
 CAMPUS_BASE_URL = 'https://api.planningcenteronline.com/people/v2/campuses'
 BASE_URL_WORKFLOW = 'https://api.planningcenteronline.com/people/v2/workflows/'
-# Try to load planning centre API passworkds
-try:
-    SECRET = np.loadtxt('keys.txt', dtype = str)    #load passwords
-    API_APP_ID = f"{SECRET[0]}"     #username
-    API_SECRET = f"{SECRET[1]}"     #password key for API
-except FileNotFoundError:
-    print('API Secret KEY not found. Terminating.')
-    sys.exit()
 
 #request retries
 retries = 5
@@ -27,17 +20,32 @@ retries = 5
 #set toggle to write CSV files or not
 WRITE_CSV = True
 #set path to writing files - this will be different for each person running the code
-writepath = r'/Users/jacealloway/Desktop/python/C3/workflowexports/'
+KEY_path = r'/Users/jacealloway/Desktop/python/apikey/'
+WF_writepath = r'/Users/jacealloway/Desktop/python/pco_access/workflowexports/'
+CPPL_writepath = r'/Users/jacealloway/Desktop/python/pco_access/campuspeopleexports/'
+TEAM_writepath = r'/Users/jacealloway/Desktop/python/pco_access/teamexports/'
+
+# Try to load planning centre API passworkds
+try:
+    SECRET = np.loadtxt(f'{KEY_path}keys.txt', dtype = str)    #load passwords
+    API_APP_ID = f"{SECRET[0]}"     #username
+    API_SECRET = f"{SECRET[1]}"     #password key for API
+except FileNotFoundError:
+    print('API Secret KEY not found. Terminating.')
+    sys.exit()
+
 #add toggle to fetch workflow data or team data 
 PEOPLE = False
+CAMPUSES = False
 WORKFLOWS = False 
 TEAMS = True
 
-desired_workflows={'548715': 'CREATIVE TEAM',
+desired_workflows={
+'548715': 'CREATIVE TEAM',
 # '544795': 'DT BAPTISMS',
 # '544778': 'DT CHILD DEDICATIONS',
 '564585': 'DT MAINTENANCE TEAM',
-# '544755': 'DT NEW PEOPLE FOLLOW UP',
+# '544755': 'DT NEW PEOPLE FOLLOW UP',        #FOR WINNIE
 '544593': 'DT TEAM ONBOARDING - C3 KIDS',
 '550431': 'DT TEAM ONBOARDING - CAFE',
 '550408': 'DT TEAM ONBOARDING - HOSPITALITY',
@@ -51,7 +59,7 @@ desired_workflows={'548715': 'CREATIVE TEAM',
 '544885': 'HAM TEAM ONBOARDING - SERVICE PRODUCTION',
 # '544809': 'HAMILTON BAPTISMS',
 '564649': 'HAMILTON MAINTENANCE TEAM',
-# '548180': 'HAMILTON NEW PEOPLE FOLLOW UP',
+# '548180': 'HAMILTON NEW PEOPLE FOLLOW UP',      #FOR WINNIE
 '544664': 'HAMILTON TEAM ONBOARDING - C3 KIDS',
 '550421': 'HAMILTON TEAM ONBOARDING - HOSPITALITY',
 '544725': 'HAMILTON TEAM ONBOARDING - HOSTING',
@@ -59,7 +67,7 @@ desired_workflows={'548715': 'CREATIVE TEAM',
 '544846': 'HAMILTON TEAM ONBOARDING - WORSHIP',
 # '555089': 'Love This City',
 '564646': 'MT MAINTENANCE TEAM',
-# '548148': 'MT NEW PEOPLE FOLLOW UP',
+# '548148': 'MT NEW PEOPLE FOLLOW UP',        #FOR WINNIE
 '544649': 'MT TEAM ONBOARDING - C3 KIDS',
 '550418': 'MT TEAM ONBOARDING - HOSPITALITY',
 '544718': 'MT TEAM ONBOARDING - HOSTING',
@@ -70,6 +78,8 @@ desired_workflows={'548715': 'CREATIVE TEAM',
 # '561167': 'TEST')
 }
 
+
+
 def params() -> None:
     """
     Initializing function to confirm user settings.
@@ -78,18 +88,24 @@ def params() -> None:
     print()
     print(f'------ Execute API request for the following data: ------')
     print()
+    print('API_key Path:        {}'.format(KEY_path))
+    print()
     print('Retrieve_people:     {}'.format(PEOPLE))
+    print('Retrieve_campuses:   {}'.format(CAMPUSES))
     print('Retrieve_workflows:  {}'.format(WORKFLOWS))
     print('Retrieve_teams:      {}'.format(TEAMS))
     print('....Retries:         {}'.format(retries))
     print()
     print('Write_CSV:           {}'.format(WRITE_CSV))
-    print('....Write Filepath:  {}'.format(writepath))
+    print('....Campus Writepath:{}'.format(CPPL_writepath))
+    print('....WF Writepath:    {}'.format(WF_writepath))
+    print('....Team Filepath:   {}'.format(TEAM_writepath))
+
     print()
-    # if WORKFLOWS == True:
-    print('Exporting workflows:')
-    for wf_id, wf_name in desired_workflows.items():
-        print('..................   {}'.format(wf_name))
+    if WORKFLOWS == True:
+        print('Exporting workflows:')
+        for wf_id, wf_name in desired_workflows.items():
+            print('..................   {}'.format(wf_name))
 
     print()
     initialize = input(f'Press ENTER to continue export. To edit parameters, press "%any key%+ENTER". To exit export at any time, press "CTRL+C".')
@@ -317,7 +333,7 @@ if __name__ == '__main__':
 
             # Open CSV file for writing
             try:
-                with open(writepath + f'peopledata{created_at}.csv', 'w', newline='') as csvfile:
+                with open(CPPL_writepath + f'peopledata{created_at}.csv', 'w', newline='') as csvfile:
                     writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
                     writer.writeheader()
 
@@ -386,58 +402,58 @@ if __name__ == '__main__':
         WorkflowSteps_Dict = pcfetch.getWorkflowSteps(Workflow_Dict)
 
 
+        if CAMPUSES:
+            def writeWorkflowCampusDictCSV(workflow_dict: dict, campus_dict: dict) -> None:
+                """
+                Write CSV of current workflows, ID's, and associated campuses.
+                """
+                #write current time 
+                time_created = date.today()
+                
+                #initialize columns
+                cols_init=[
+                    'campus ID',
+                    'campus name',
+                    'workflow ID',
+                    'workflow name'
+                ]
 
-        def writeWorkflowCampusDictCSV(workflow_dict: dict, campus_dict: dict) -> None:
-            """
-            Write CSV of current workflows, ID's, and associated campuses.
-            """
-            #write current time 
-            time_created = date.today()
-            
-            #initialize columns
-            cols_init=[
-                'campus ID',
-                'campus name',
-                'workflow ID',
-                'workflow name'
-            ]
+                try:
+                    #begin writing with open
+                    with open(CPPL_writepath + f'campusexport{time_created}.csv', 'w', newline='') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=cols_init)
+                        writer.writeheader()
 
-            try:
-                #begin writing with open
-                with open(writepath + f'campusexport{time_created}.csv', 'w', newline='') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=cols_init)
-                    writer.writeheader()
+                        #iterate through workflow dictionary to retrieve all ID's and names
+                        for workflow_id in workflow_dict.keys():
+                            workflow_name = workflow_dict[f'{workflow_id}']['name']
+                            campus_ID = workflow_dict[f'{workflow_id}']['campus ID']
+                            if campus_ID == None:
+                                campus_name = 'None'
+                                campus_ID = 'None'
+                            elif campus_ID != None:
+                                campus_name = campus_dict[f'{campus_ID}']
 
-                    #iterate through workflow dictionary to retrieve all ID's and names
-                    for workflow_id in workflow_dict.keys():
-                        workflow_name = workflow_dict[f'{workflow_id}']['name']
-                        campus_ID = workflow_dict[f'{workflow_id}']['campus ID']
-                        if campus_ID == None:
-                            campus_name = 'None'
-                            campus_ID = 'None'
-                        elif campus_ID != None:
-                            campus_name = campus_dict[f'{campus_ID}']
+                            #fill the row with the given variables
+                            row = {
+                                'campus ID' : campus_ID,
+                                'campus name' : campus_name,
+                                'workflow ID' : workflow_id,
+                                'workflow name' : workflow_name
+                            }
 
-                        #fill the row with the given variables
-                        row = {
-                            'campus ID' : campus_ID,
-                            'campus name' : campus_name,
-                            'workflow ID' : workflow_id,
-                            'workflow name' : workflow_name
-                        }
+                            #write the row 
+                            writer.writerow(row)
 
-                        #write the row 
-                        writer.writerow(row)
+                    print(f"CSV file 'campusexport{time_created}.csv' created successfully.")
 
-                print(f"CSV file 'campusexport{time_created}.csv' created successfully.")
-
-            except IOError:
-                print('I/O Error while writing CSV.')
+                except IOError:
+                    print('I/O Error while writing CSV.')
 
 
-        # #write all workflow's and campus's to CSV
-        if WRITE_CSV:
-            writeWorkflowCampusDictCSV(Workflow_Dict, Campus_Dict)
+            # #write all workflow's and campus's to CSV
+            if WRITE_CSV:
+                writeWorkflowCampusDictCSV(Workflow_Dict, Campus_Dict)
 
 
         def retrieveWorkflowPeople(workflow_ID: int, batchsize = 100) -> dict:
@@ -679,7 +695,7 @@ if __name__ == '__main__':
 
             
             try:
-                with open(writepath + f'{workflow_id}export{time_created}.csv', 'w', newline='') as csvfile:
+                with open(WF_writepath + f'{workflow_id}export{time_created}.csv', 'w', newline='') as csvfile:
                     writer = csv.DictWriter(csvfile, fieldnames=cols_init)
                     writer.writeheader()
 
