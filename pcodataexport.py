@@ -4,6 +4,7 @@ from datetime import datetime, date
 from planningcenterauth import pcfetch
 import csv
 
+
 #set global date variable 
 date_string = date.today()
 
