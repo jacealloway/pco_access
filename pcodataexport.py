@@ -20,7 +20,6 @@ WF_filename = f'workflows{date_string}.csv'
 people_data_df = pd.read_csv(campuspeople_fetchpath + f'peopledata{date_string}.csv', delimiter = ',')
 
 
-
 #get campus dictionary
 Campus_Dict = pcfetch.getCampusIDS()
 #get workflow dictionary
