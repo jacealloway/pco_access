@@ -1,0 +1,19 @@
+Run at 4am on Tuesdays
+Source bash 
+Call python to run file
+Log output on logging file 
+Append logging file 
+
+Create/confirm variables:
+$HOME == ~ == /Users/jacealloway
+PCOFOLDER = $HOME/Desktop/python/pco_access
+
+00 4 * * 2 source $HOME/.bash_profile; python $PCOFOLDER/planningcenterauth.py >> $PCOFOLDER/pcoauth.log 2>&1; echo "" >> $PCOFOLDER/pcoauth.log
+
+10 4 * * 2 source $HOME/.bash_profile; python $PCOFOLDER/pcodataexport.py >> $PCOFOLDER/dataexport.log 2>&1; echo "" >> $PCOFOLDER/dataexport.log
+
+20 4 * * 2 source $HOME/.bash_profile; python $PCOFOLDER/gapi_pushdata.py >> $PCOFOLDER/push.log 2>&1; echo "" >> $PCOFOLDER/push.log
+
+
+
+

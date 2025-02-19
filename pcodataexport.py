@@ -1,6 +1,6 @@
 import numpy as np 
 import pandas as pd 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from planningcenterauth import pcfetch
 import csv
 
@@ -8,16 +8,17 @@ import csv
 date_string = date.today()
 
 #set path for fetching and writing files - this will be different for each person running the code
-workflow_fetchpath = r'/Users/jacealloway/Desktop/python/C3/workflowexports/'
-campuspeople_fetchpath = r'/Users/jacealloway/Desktop/python/C3/campuspeopleexports/'
-# team_fetchpath = r'Users/jacealloway/Desktop/python/C3/teamexports/' #don't need this yet
+workflow_fetchpath = r'/Users/jacealloway/Desktop/python/pco_access/workflowexports/'
+campuspeople_fetchpath = r'/Users/jacealloway/Desktop/python/pco_access/campuspeopleexports/'
+team_fetchpath = r'Users/jacealloway/Desktop/python/pco_access/teamexports/' 
 
 #path to writing files
-writepath = r'/Users/jacealloway/Desktop/python/C3/analyzed/'
-WF_filename = f'workflows{date_string}.csv'
+writepath = r'/Users/jacealloway/Desktop/python/pco_access/analyzed/'
+WF_filename = r'workflows.csv'
+NEWPPL_filename = r'newpeople.csv'
 
-
-people_data_df = pd.read_csv(campuspeople_fetchpath + f'peopledata{date_string}.csv', delimiter = ',')
+#load in the people data
+people_data_df = pd.read_csv(campuspeople_fetchpath + f'peopledata.csv', delimiter = ',')
 
 
 #get campus dictionary
@@ -29,7 +30,7 @@ WorkflowSteps_Dict = pcfetch.getWorkflowSteps(Workflow_Dict)
 
 
 #load dict of desired workflows. - try to write a way to do this automatically instead of manually
-desired_workflows={
+team_workflows={
 '548715': 'CREATIVE TEAM',
 # '544795': 'DT BAPTISMS',
 # '544778': 'DT CHILD DEDICATIONS',
@@ -64,48 +65,16 @@ desired_workflows={
 '544881': 'MT TEAM ONBOARDING - SERVICE PRODUCTION',
 '544844': 'MT TEAM ONBOARDING - WORSHIP',
 '550397': 'MT TEAM ONBOARDING - YOUTH',
-# '561167': 'TEST')
+# '561167': 'TEST'
+}
+
+newpeople_workflows={
+'544755': 'DT NEW PEOPLE FOLLOW UP',        #FOR WINNIE
+'548180': 'HAMILTON NEW PEOPLE FOLLOW UP',      #FOR WINNIE
+'548148': 'MT NEW PEOPLE FOLLOW UP'        #FOR WINNIE
 }
 
 
-
-
-
-
-#not too concerned about this function
-def getTimestring(time: str) -> str:
-    """
-    Convert a numerical time string to readable string.
-
-    Input format: "2024-08-30T22:26:53Z"
-    """
-    year = time[0:4]
-    month = time[5:7]
-    day = time[8:10]
-
-
-    hour = int(time[11:13])
-    if hour > 12:
-        hour = str(hour%12)+'pm'
-
-    months = {'01' : 'Jan',
-              '02' : 'Feb',
-              '03' : 'Mar',
-              '04' : 'Apr',
-              '05' : 'May',
-              '06' : 'Jun',
-              '07' : 'Jul',
-              '08' : 'Aug',
-              '09' : 'Sep',
-              '10' : 'Oct',
-              '11' : 'Nov',
-              '12' : 'Dec'}
-    
-    for month_entry in list(months.keys()):
-        if month_entry == month:
-            month = months[month_entry]
-
-    return month+day+year+','+hour
 
 #function to compute amount of days and hours between two timestrings
 def getTimeGap(time1: str, time2: str) -> str:
@@ -120,14 +89,44 @@ def getTimeGap(time1: str, time2: str) -> str:
         Number of days and hours between inputs (str).
     """
     format = '%Y-%m-%dT%H:%M:%SZ'
-    format = '%Y-%m-%dT%H:%M:%SZ'
 
 
     dt = datetime.strptime(time1, format) - datetime.strptime(time2, format)
 
-    return str(dt.days).replace('-', '')  # +  ' days'   #uncomment if you want 'days' units tied to return string
+    return str(dt.days).replace('-', '')  
+
+def reformatTimestring(time: str) -> str:
+    old_format = f'%Y-%m-%dT%H:%M:%SZ'
+    new_format = f'%d/%m/%Y'
+
+    old_string = datetime.strptime(time, old_format)
+    new_string = datetime.strftime(old_string, new_format)
+
+    return new_string
 
 
+def week_end_sunday(input_date):
+    """
+    Compute the week-end leading Sunday based off a given time string.
+    """
+    format = f"%d/%m/%Y"
+    weekday = datetime.strptime(input_date, format).isoweekday()
+
+    output_date = datetime.strptime(input_date, format) + timedelta(days = int(7 - (np.ceil(weekday))  ))
+
+    return datetime.strftime(output_date.date(), format)
+
+
+def reformatNAN(value: str | float) -> bool:
+    """    
+    Replace any NaN value with empty string.
+    """
+    if value != value:
+        value = ''
+        return value
+    
+    else:
+        return value
 
 
 
@@ -167,7 +166,10 @@ def getPerson(person_id: int, people_dataframe: list[int]) -> dict:
 
 
 
-def workflowExportCSV(workflow_list: dict) -> None:
+def workflowExportCSV(
+        workflow_list: dict,
+        filename: str
+        ) -> None:
     """
     insert documentation here 
     """
@@ -184,17 +186,18 @@ def workflowExportCSV(workflow_list: dict) -> None:
         'child',
         'campus name',
         'assignee',
-        'assignee address'
+        'assignee address',
+        'week end sunday'
     ]
 
     try:
-        with open(writepath + f'{WF_filename}', 'w', newline='') as csvfile:
+        with open(writepath + f'{filename}', 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=cols)
             writer.writeheader()
 
             for id in list(workflow_list.keys()):
                 #load export data and steps for current ID
-                workflow_data = pd.read_csv(workflow_fetchpath + f'{id}export{date_string}.csv', delimiter=',')
+                workflow_data = pd.read_csv(workflow_fetchpath + f'{id}export.csv', delimiter=',')
                 stepslist = WorkflowSteps_Dict[f'{id}']
                 workflow_name = Workflow_Dict[f'{id}']['name']
 
@@ -216,11 +219,16 @@ def workflowExportCSV(workflow_list: dict) -> None:
                     assignee_name = assignee['name']
                     assignee_email = assignee['address']
 
+                    gender = reformatNAN(gender)
+                    email = reformatNAN(email)
+                    assignee_email = reformatNAN(assignee_email)
+
                     #if a person has been removed from the WF, we move to the next person.
                     removed = str(workflow_data['removed'].values[idx])
                     if removed == 'True':
                         continue
 
+                    #evaluate time stamps
                     for sequence in range(N-1):
                         step_name = stepslist[sequence]['name']
                         try:
@@ -233,18 +241,33 @@ def workflowExportCSV(workflow_list: dict) -> None:
 
                         current_time = str(datetime.now().strftime(f"%Y-%m-%dT%H:%M:%SZ"))
 
-                        try:
-                            days_at_step = getTimeGap(time_initiated, time_completed)
-                        except ValueError:
-                            days_at_step = ''
 
+                        #remove nan values, evaluated time stamps
                         try:
+                            if time_initiated.startswith('nan'):
+                                #break the loop and do not write the row if the step has not been initiated
+                                continue
+
                             if time_completed.startswith('nan'):
+                                time_completed = ''
                                 days_at_step = getTimeGap(time_initiated, current_time)
+
+                                #reformat the string if not empty
+                                time_initiated = reformatTimestring(time_initiated)
+                            
+                            else:
+                                days_at_step = getTimeGap(time_initiated, time_completed)
+
+                                #reformat the strings if not empty
+                                time_initiated = reformatTimestring(time_initiated)
+                                time_completed = reformatTimestring(time_completed)
+
+
                         except ValueError:
                             days_at_step = ''
 
 
+                        next_sunday = week_end_sunday(datetime.strftime(datetime.strptime(current_time, f"%Y-%m-%dT%H:%M:%SZ"), f"%d/%m/%Y"))
 
                         row = {
                             'full name' : name,
@@ -258,14 +281,15 @@ def workflowExportCSV(workflow_list: dict) -> None:
                             'child' : child_bool,
                             'campus name' : campus,
                             'assignee' : assignee_name,
-                            'assignee address' : assignee_email
+                            'assignee address' : assignee_email,
+                            'week end sunday' : next_sunday
                         }
                     
                         writer.writerow(row)
 
 
 
-            print(f"CSV file '{WF_filename}' created successfully.")
+            print(f"CSV file '{filename}' created successfully on {date_string}.")
 
     except IOError:
         print("I/O error while writing CSV.")
@@ -273,5 +297,7 @@ def workflowExportCSV(workflow_list: dict) -> None:
 
 
 
-workflowExportCSV(desired_workflows)
+workflowExportCSV(team_workflows, WF_filename)
+workflowExportCSV(newpeople_workflows, NEWPPL_filename)
+
 

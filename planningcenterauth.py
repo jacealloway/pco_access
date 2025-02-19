@@ -3,9 +3,12 @@ import numpy as np
 import requests
 from requests.auth import HTTPBasicAuth
 import csv
-from datetime import date
+from datetime import date, datetime
 import sys
 import time
+
+#fetch reequest date
+today = date.today()
 
 #set file variables 
 BASE_URL_SERVICES = 'https://api.planningcenteronline.com/services/v2/'
@@ -17,15 +20,13 @@ BASE_URL_WORKFLOW = 'https://api.planningcenteronline.com/people/v2/workflows/'
 #request retries
 retries = 5
 
-#set toggle to write CSV files or not
-WRITE_CSV = True
 #set path to writing files - this will be different for each person running the code
-KEY_path = r'/Users/jacealloway/Desktop/python/apikey/'
+KEY_path = r'/Users/jacealloway/Desktop/python/pco_access/apikey/'
 WF_writepath = r'/Users/jacealloway/Desktop/python/pco_access/workflowexports/'
 CPPL_writepath = r'/Users/jacealloway/Desktop/python/pco_access/campuspeopleexports/'
 TEAM_writepath = r'/Users/jacealloway/Desktop/python/pco_access/teamexports/'
 
-# Try to load planning centre API passworkds
+# Try to load planning centre API passwords
 try:
     SECRET = np.loadtxt(f'{KEY_path}keys.txt', dtype = str)    #load passwords
     API_APP_ID = f"{SECRET[0]}"     #username
@@ -34,13 +35,16 @@ except FileNotFoundError:
     print('API Secret KEY not found. Terminating.')
     sys.exit()
 
-#add toggle to fetch workflow data or team data 
-PEOPLE = False
-CAMPUSES = False
-WORKFLOWS = False 
-TEAMS = True
 
-desired_workflows={
+#set toggle to write CSV files or not
+WRITE_CSV = True
+#add toggle to fetch workflow data or team data 
+PEOPLE = True
+CAMPUSES = True
+WORKFLOWS = True 
+TEAMS = False
+
+team_workflows={
 '548715': 'CREATIVE TEAM',
 # '544795': 'DT BAPTISMS',
 # '544778': 'DT CHILD DEDICATIONS',
@@ -75,47 +79,19 @@ desired_workflows={
 '544881': 'MT TEAM ONBOARDING - SERVICE PRODUCTION',
 '544844': 'MT TEAM ONBOARDING - WORSHIP',
 '550397': 'MT TEAM ONBOARDING - YOUTH',
-# '561167': 'TEST')
+# '561167': 'TEST'
 }
 
+newpeople_workflows={
+'544755': 'DT NEW PEOPLE FOLLOW UP',        #FOR WINNIE
+'548180': 'HAMILTON NEW PEOPLE FOLLOW UP',      #FOR WINNIE
+'548148': 'MT NEW PEOPLE FOLLOW UP'        #FOR WINNIE
+}
 
-
-def params() -> None:
-    """
-    Initializing function to confirm user settings.
-    """
-    print('Date: {}'.format(date.today()))
-    print()
-    print(f'------ Execute API request for the following data: ------')
-    print()
-    print('API_key Path:        {}'.format(KEY_path))
-    print()
-    print('Retrieve_people:     {}'.format(PEOPLE))
-    print('Retrieve_campuses:   {}'.format(CAMPUSES))
-    print('Retrieve_workflows:  {}'.format(WORKFLOWS))
-    print('Retrieve_teams:      {}'.format(TEAMS))
-    print('....Retries:         {}'.format(retries))
-    print()
-    print('Write_CSV:           {}'.format(WRITE_CSV))
-    print('....Campus Writepath:{}'.format(CPPL_writepath))
-    print('....WF Writepath:    {}'.format(WF_writepath))
-    print('....Team Filepath:   {}'.format(TEAM_writepath))
-
-    print()
-    if WORKFLOWS == True:
-        print('Exporting workflows:')
-        for wf_id, wf_name in desired_workflows.items():
-            print('..................   {}'.format(wf_name))
-
-    print()
-    initialize = input(f'Press ENTER to continue export. To edit parameters, press "%any key%+ENTER". To exit export at any time, press "CTRL+C".')
-    if len(initialize) > 0:
-        print('Exiting...')
-        sys.exit()
-    else:
-        print(f'---------------------------------------------------------')
-        print('Terminal:')
-
+#write a function to establish logging outputs
+def logging() -> None:
+    print(f'Data fetch requested at {datetime.now()}.')
+    print(f'people fetch = {PEOPLE}, campus fetch = {CAMPUSES}, workflow fetch = {WORKFLOWS}, teams fetch = {TEAMS}')
 
 
 
@@ -248,8 +224,8 @@ class pcfetch():
 
 
 if __name__ == '__main__':
-    #communicate parameters
-    params()
+    #log the call
+    logging()
 
     #PEOPLE TOGGLE
     if PEOPLE == True:
@@ -321,7 +297,6 @@ if __name__ == '__main__':
                 people_data (list): A list of dictionaries containing people data.
                 csv_filename (str): The name of the CSV file to save the data to.
             """
-            created_at = date.today()
 
             # Define the columns for the CSV
             csv_columns = [
@@ -333,7 +308,7 @@ if __name__ == '__main__':
 
             # Open CSV file for writing
             try:
-                with open(CPPL_writepath + f'peopledata{created_at}.csv', 'w', newline='') as csvfile:
+                with open(CPPL_writepath + f'peopledata.csv', 'w', newline='') as csvfile:
                     writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
                     writer.writeheader()
 
@@ -378,7 +353,7 @@ if __name__ == '__main__':
 
                         writer.writerow(row)
 
-                print(f"CSV file 'peopledata{created_at}.csv' created successfully.")
+                print(f"CSV file 'peopledata.csv' created successfully on {today}.")
 
             except IOError:
                 print("I/O error while writing the CSV file.")
@@ -407,8 +382,6 @@ if __name__ == '__main__':
                 """
                 Write CSV of current workflows, ID's, and associated campuses.
                 """
-                #write current time 
-                time_created = date.today()
                 
                 #initialize columns
                 cols_init=[
@@ -420,7 +393,7 @@ if __name__ == '__main__':
 
                 try:
                     #begin writing with open
-                    with open(CPPL_writepath + f'campusexport{time_created}.csv', 'w', newline='') as csvfile:
+                    with open(CPPL_writepath + f'campusexport.csv', 'w', newline='') as csvfile:
                         writer = csv.DictWriter(csvfile, fieldnames=cols_init)
                         writer.writeheader()
 
@@ -445,7 +418,7 @@ if __name__ == '__main__':
                             #write the row 
                             writer.writerow(row)
 
-                    print(f"CSV file 'campusexport{time_created}.csv' created successfully.")
+                    print(f"CSV file 'campusexport.csv' created successfully on {today}.")
 
                 except IOError:
                     print('I/O Error while writing CSV.')
@@ -665,12 +638,12 @@ if __name__ == '__main__':
             return hist_dict
 
 
-        def writeWorkflowHistCSV(workflow_id) -> None:
+        def writeWorkflowHistCSV(
+                workflow_id: int | str
+                ) -> None:
             """
             Write a workflow history to a CSV file for people in each workflow. 
             """
-            #get time of creation
-            time_created = date.today()
 
             #retrieve total number of workflow steps from the workflow steps dict
             num_steps = len(list(WorkflowSteps_Dict[f'{workflow_id}']))
@@ -695,7 +668,7 @@ if __name__ == '__main__':
 
             
             try:
-                with open(WF_writepath + f'{workflow_id}export{time_created}.csv', 'w', newline='') as csvfile:
+                with open(WF_writepath + f'{workflow_id}export.csv', 'w', newline='') as csvfile:
                     writer = csv.DictWriter(csvfile, fieldnames=cols_init)
                     writer.writeheader()
 
@@ -729,12 +702,18 @@ if __name__ == '__main__':
                         #write the row 
                         writer.writerow(row)
 
-                print(f"CSV file '{workflow_id}export{time_created}.csv' created successfully.")
+                print(f"CSV file '{workflow_id}export.csv' created successfully on {today}.")
 
             except IOError:
                 print('I/O Error while writing CSV.')
 
         #script to export all workflow histories.
         if WRITE_CSV:
-            for flow_id in list(desired_workflows.keys()):
+            for flow_id in list(team_workflows.keys()):
                 writeWorkflowHistCSV(flow_id)
+
+            for flow_id in list(newpeople_workflows.keys()):
+                writeWorkflowHistCSV(flow_id)
+
+    print('End of fetch request.')
+    print()
