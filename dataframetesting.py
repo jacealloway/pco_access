@@ -14,7 +14,7 @@ new_string = datetime.strftime(date_string, format)
 
 
 def week_end_sunday(input_date):
-    format = f"%d/%m/%Y"
+    f'%m/%d/%Y'
     weekday = datetime.strptime(input_date, format).isoweekday()
 
     output_date = datetime.strptime(input_date, format) + timedelta(days= int(7 - (np.ceil(weekday))  ))
