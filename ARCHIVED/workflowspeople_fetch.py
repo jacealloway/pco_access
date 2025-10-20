@@ -39,8 +39,8 @@ except FileNotFoundError:
 #set toggle to write CSV files or not
 WRITE_CSV = True
 #add toggle to fetch workflow data or team data 
-PEOPLE = True
-CAMPUSES = True
+PEOPLE = False
+CAMPUSES = False
 WORKFLOWS = True 
 
 
@@ -676,7 +676,7 @@ if __name__ == '__main__':
                 cols_init.append(str((sequence))+' created at')
 
             #retrieve the people in a workflow
-            workflow_people = retrieveWorkflowPeople(workflow_id)
+            workflow_people = retrieveWorkflowPeople(int(workflow_id))
             #get the total number of cards
             num_people = len(list(workflow_people))
 

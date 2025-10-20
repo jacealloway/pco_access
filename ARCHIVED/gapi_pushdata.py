@@ -16,7 +16,7 @@ SPREADSHEET_ID = f"{SECRET[2]}"
 workflows_filepath = f'/Users/jacealloway/Desktop/python/pco_access/analyzed/workflows.csv'
 newpeople_filepath = f'/Users/jacealloway/Desktop/python/pco_access/analyzed/newpeople.csv'
 groups_filepath = f'/Users/jacealloway/Desktop/python/pco_access/analyzed/groups.csv'
-
+teams_filepath = f'/Users/jacealloway/Desktop/python/pco_access/analyzed/teamsservices.csv'
 
 def authenticate() -> str:
     creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes = SCOPES)
@@ -49,8 +49,8 @@ def sheet_clear(sheet_name: str) -> None:
 
 
 #push data. number of files and number of unique sheet names must be the same.
-files_to_push = (workflows_filepath, newpeople_filepath, groups_filepath)
-sheetnames = ("teamworkflows", "newpeople", "groups")
+files_to_push = (workflows_filepath, newpeople_filepath, groups_filepath, teams_filepath)
+sheetnames = ("teamworkflows", "newpeople", "groups", "teams")
 
 try:
     for n in range(len(files_to_push)):

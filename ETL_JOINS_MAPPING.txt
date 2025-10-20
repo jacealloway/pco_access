@@ -1,0 +1,364 @@
+WORKFLOWS DEFINED DATAFRAME DIRECTORY:
+
+        DF_WORKFLOWS_REFINED.columns
+            id                                      |           ID of workflow
+            attributes.name                         |           Name of workflow
+            relationships.campus.data.id            |           ID of associated campus
+
+        DF_WORKFLOW_STEPS_REFINED.columns 
+            relationships.workflow.data.id          |           ID of associated workflow
+            id                                      |           ID of workflow step
+            attributes.name                         |           Name of workflow step
+            attributes.sequence                     |           Step order index sequence   
+
+        DF_WORKFLOW_CARDS_REFINED.columns
+            id                                      |           ID of card
+            relationships.person.data.id            |           ID of associated person to card
+            relationships.assignee.data.id          |           ID of associated assignee to card
+            relationships.workflow.data.id          |           ID of associated workflow
+            attributes.stage                        |           Stage of card (removed/ready/completed)
+            attributes.created_at                   |           Timestamp of card creation
+            attributes.moved_to_step_at             |           Timestamp of when card was moved to current workflow step 
+            relationships.current_step.data.id      |           ID of current workflow step 
+
+        DF_CAMPUSES_REFINED.columns
+            id                                      |           ID of campus    
+            attributes.name                         |           Name of campus
+
+        DF_EMAILS_REFINED.columns
+            relationships.person.data.id            |           ID of associated person
+            attributes.address                      |           Email address
+
+        DF_PEOPLE_REFINED.columns
+            id                                      |           ID of person
+            attributes.name                         |           Full name of person
+            relationships.primary_campus.data.id    |           ID associated to primary campus
+            attributes.child                        |           Bool child indicator (True/False)
+
+        DF_ALL_WORKFLOW_HISTORY_REFINED.columns
+            relationships.workflow_card.data.id     |           ID associated to workflow card
+            relationships.workflow_step.data.id     |           ID associated to workflow step of workflow card 
+            attributes.created_at                   |           Timestamp of when the history entry was created
+            attributes.type                         |           Log of type of event associated with workflow card 
+
+
+
+
+
+
+WORKFLOWS MAPPING:               
+
+        ----- Description -----                             ----- Join Action -----------------------------------------------------                                     ----- Join-On Variable -----
+       |                       |                           |                                                                       |                                   |                            |  
+
+        Emails -> Person                                    Person LEFT JOIN Emails:        Not every person may have an email                                          Person ID    
+
+        Campus -> Person                                    People LEFT JOIN Campus:        Not every person may have a campus ID                                       Campus ID
+
+                                            ---------------------------------------------------------------------------
+                                                DF_PEOPLE_ALL should now include: 
+                                                        'id', 'full_name', 'campus_id', 'child', 'email_address', 
+                                                        'campus_name'
+                                            ---------------------------------------------------------------------------
+
+        Campus -> Workflow                                  Workflow LEFT JOIN Campus:      Not every workflow may have a campus                                        Campus ID
+
+        Workflow Name, Workflow Campus -> Workflow Steps                                                                                                                Workflow ID
+
+                                            ---------------------------------------------------------------------------
+                                                DF_WORKFLOWS_ALL should now include: 
+                                                        'id', 'workflow_name', 'campus_id', 'campus_name'
+                                                DF_WORKFLOW_STEPS_ALL should now include: 
+                                                        'workflow_id', 'workflow_step_id', 'step_name', 
+                                                        'sequence', 'workflow_name', 'campus_id', 'campus_name'
+                                            ---------------------------------------------------------------------------
+
+        Person -> Workflow Card Person, Card Assignee                                                                                                                   Person ID / Assignee ID
+
+                                            ---------------------------------------------------------------------------
+                                                DF_WORKFLOW_CARDS_ALL_PEOPLE should now include: 
+                                                        'card_id', 'person_id', 'assignee_id', 'workflow_id', 'stage',
+                                                        'card_created_at', 'moved_to_step_at', 'current_step_id', 'person_name',
+                                                        'person_campus_id', 'gender', 'person_email', 'person_campus',
+                                                        'assignee_name', 'assignee_email'
+                                            ---------------------------------------------------------------------------
+
+        Workflow Step -> Workflow Card Current Step                                                                                                                     Workflow Step ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_WORKFLOW_CARDS_ALL should now include: 
+                                                        'card_id', 'person_id', 'assignee_id', 'workflow_id', 'stage',
+                                                        'card_created_at', 'moved_to_step_at', 'current_step_id', 'person_name',
+                                                        'person_campus_id', 'gender', 'person_email', 'person_campus',
+                                                        'assignee_name', 'assignee_email', 'current_step_name', 'current_step_sequence',
+                                                        'current_step_workflow_name', 'current_step_campus_name'
+
+                                            ---------------------------------------------------------------------------
+
+
+        Workflow Card -> Workflow History                                                                                                                               Workflow Card ID
+
+        Workflow Step -> Workflow History                                                                                                                               Workflow Step ID
+
+                                            ---------------------------------------------------------------------------
+                                                DF_ALL_DATA should now include:
+                                                        'log_created_at', 'history_step_id', 'log_entry', 'card_id',
+                                                        'person_id', 'history_workflow_id', 'card_created_at',
+                                                        'moved_to_step_at', 'current_step_id', 'person_name', 'gender',
+                                                        'person_email', 'person_primary_campus', 'assignee_name',
+                                                        'assignee_email', 'current_step_name', 'current_step_sequence',
+                                                        'current_step_workflow_name', 'current_step_workflow_campus_name',
+                                                        'history_step_name', 'history_sequence', 'history_workflow_name',
+                                                        'history_workflow_primary_campus', 'stage'
+                                            ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+GROUPS DEFINED DATAFRAME DIRECTORY:
+
+        DF_GROUPTYPE_REFINED.columns  
+                                                                                                                            *defaults*
+                                                                                                                        --unique      Unique Groups 
+                                                                                                                        --444317      Teams 
+                                                                                                                        448283      Coach Group 
+                                                                                                                        448862      Connect Groups
+                                                                                                                        --448873      Leadership Category Groups 
+                                                                                                                        --449554      Team Leaders 
+            id                                      |           ID of group type 
+            attributes.name                         |           Name of group type
+
+        DF_CAMPUSES_REFINED.columns 
+            id                                      |           ID of campus 
+            attributes.name                         |           Name of campus         
+        
+        DF_GROUPS_REFINED.columns 
+            id                                      |           ID of group 
+            attributes.name                         |           Name of group 
+            attributes.memberships_count            |           Count of members in the group 
+            relationships.group_type.data.id        |           ID of associated group type 
+
+        DF_GROUPS_BY_CAMPUS_REFINED.columns 
+            id                                      |           ID of associated group 
+            campus_id                               |           ID of associated campus
+
+        DF_EVENTS_REFINED.columns                   
+            id                                      |           ID of event 
+            attributes.name                         |           Name of event 
+            attributes.visitors_count               |           Count of visitors for the given event 
+            relationships.group.data.id             |           ID of associated group to the event  
+            attributes.starts_at                    |           Datetime of event start 
+
+        DF_GROUPS_PEOPLE_REFINED.columns 
+            id                                      |           ID of person 
+            attributes.first_name                   |           Person first name 
+            attributes.last_name                    |           Person last name 
+            attributes.email_addresses              |           Person email address (es)
+            attributes.phone_numbers                |           Person phone number (s)
+
+        DF_GROUP_TAGS_REFINED.columns   
+            group_id                                |           ID of tag 
+            attributes.name                         |           Name of tag 
+
+        DF_ATTENDANCES_REFINED.columns 
+            event.data.id                           |           ID of event 
+            attributes.attended                     |           Attendance boolean 
+            relationships.person.data.id            |           ID of attended person 
+            attributes.role                         |           Role of attended person (member/leader)
+
+        DF_MEMBERSHIPS_REFINED.columns 
+            attributes.joined_at                    |           Timestamp of when person joined group 
+            relationships.group.data.id             |           ID of associated group 
+            relationships.person.data.id            |           ID of person in group 
+
+
+
+
+GROUPS MAPPING:               
+
+        ----- Description -----                             ----- Join Action -----------------------------------------------------                                     ----- Join-On Variable -----
+       |                       |                           |                                                                       |                                   |                            |  
+        Groups -> Grouptype                                 Grouptype LEFT JOIN Groups:     Only include coach and connect groups                                       Grouptype ID    
+
+        Events -> Grouptype+Groups                          Grouptype/Groups LEFT JOIN Events:     Events are under group ID                                            Group ID
+
+                                            ---------------------------------------------------------------------------
+                                                DF_EVENTS_GROUPS should now include: 
+                                                        'group_type_id', 'group_type', 'group_id', 
+                                                        'group_name', 'member_count', 'event_id', 
+                                                        'event_name', 'visitor_count', 'starts_at', 
+                                                        'tag_ids
+                                            ---------------------------------------------------------------------------
+
+        Campus name -> Groups by Campus                     Groups by campus LEFT JOIN Campus name                                                                      Campus ID 
+
+        Groups by Campus -> Events and Groups               Events and Groups LEFT JOIN Groups by Campus                                                                Group ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_ALL_GROUP_EVENTS should now include:
+                                                        'group_type_id', 'group_type', 'group_id', 
+                                                        'group_name', 'member_count', 'event_id', 
+                                                        'event_name', 'visitor_count', 'starts_at', 
+                                                        'campus_id', 'campus_name'
+                                            ---------------------------------------------------------------------------
+
+        Group attendance -> Events and Groups               Events per group INNER JOIN Group attendances       Each attendance has a group                             Event ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_GROUP_EVENT_ATTENDANCES_ALL should now include:
+                                                        'attended_ind', 'person_id', 'role', 
+                                                        'group_type_id', 'group_type',
+                                                        'group_id', 'group_name', 'member_count', 
+                                                        'event_id', 'event_name', 'visitor_count', 
+                                                        'starts_at', 'campus_id', 'campus_name'
+                                            ---------------------------------------------------------------------------
+
+        Person -> Memberships                               Memberships LEFT JOIN Person        Each memberhsip has an associated person                                Person ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_MEMBERSHIPS_PEOPLE should now include:
+                                                        'joined_at', 'group_id', 'person_id', 
+                                                        'first_name', 'last_name', 'phone_numbers', 
+                                                        'email_addresses'
+                                            ---------------------------------------------------------------------------
+
+        Memberships -> Attendance                           Attendance for events INNER JOIN Memberships                                                                Group ID, Person ID
+
+        Tags -> All group data                              All group data LEFT JOIN Tags                                                                               Group ID
+
+                                            ---------------------------------------------------------------------------
+                                                DF_GROUPS_ALL should now include:
+                                                        'attributes.name', 'group_id', 'attended_ind', 'person_id', 'role',
+                                                        'group_type_id', 'group_type', 'group_name', 'member_count', 'event_id',
+                                                        'event_name', 'visitor_count', 'starts_at', 'campus_id', 'campus_name',
+                                                        'joined_at', 'first_name', 'last_name', 'phone_numbers',
+                                                        'email_addresses'
+                                            ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PLANS DEFINED DATAFRAME DIRECTORY:
+
+        DF_SERVICE_TYPES_REFINED.columns
+            id                                      |           ID of service type 
+            attributes.name                         |           Name of service type (SUNDAY SERVICES // DOWNTOWN:MIDTOWN:HAMILTON)
+            
+        DF_TEAMS_REFINED.columns 
+            id                                      |           ID of team 
+            attributes.name                         |           Name of team 
+            relationships.service_type.data.id      |           ID of associated service type 
+            
+        DF_PLANS_REFINED.columns 
+            id                                      |           ID of plan 
+            attributes.dates                        |           Plan initiating date 
+            attributes.plan_people_count            |           Count of people within the plan 
+            relationships.service_type.data.id      |           ID of associated service type 
+
+        DF_TEAM_MEMBERS_REFINED.columns 
+            attributes.status                       |           Status of person roster (C, U, D)
+            relationships.plan.data.id              |           ID of associated plan
+            relationships.person.data.id            |           ID of person (person)
+            relationships.scheduled_by.data.id      |           ID of scheduler (person)
+            relationships.service_type.data.id      |           ID of associated service type 
+            relationships.team.data.id              |           ID of associated team
+
+        DF_ROSTER_PEOPLE_REFINED.columns 
+            id                                      |           ID of person 
+            attributes.full_name                    |           Full name of person 
+            attributes.passed_background_check      |           Boolean of whether person has passed VSC
+
+
+PLANS MAPPING:
+
+        ----- Description -----                             ----- Join Action -----------------------------------------------------                                     ----- Join-On Variable -----
+       |                       |                           |                                                                       |                                   |                            |  
+
+        Service Type -> Team Members                        Team Members LEFT JOIN Service Type:   Need service type name for each roster                               Service Type ID 
+
+        Teams -> Team Members                               Team Members LEFT JOIN Teams:       Need plan date for each roster as PK                                    Team ID 
+
+        Plans -> Teams + Team Members                       Teams + Team Members LEFT JOIN Plans:       Need team name for each roster                                  Service Plan ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_ALL_ROSTERS (1) should now include: 
+                                                        'status', 'person_id', 'person_name', 
+                                                        'scheduler_id', 'servicetype_name', 
+                                                        'team_name', 'plan_date'     
+                                            ---------------------------------------------------------------------------
+
+        Roster People -> All Rosters                        All Rosters INNER JOIN Roster People:   Need specific scheduler associated with each roster                  Person ID 
+
+        Roster People -> All Rosters                        All Rosters INNER JOIN Roster People:   Need specific person name associated with each roster                Person ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_ALL_ROSTERS (2) should now include: 
+                                                        'status', 'person_id', 'person_name', 
+                                                        'passed_background_check', 'scheduler_id', 
+                                                        'scheduler_name', 'servicetype_name', 
+                                                        'team_name', 'plan_date'    
+                                            ---------------------------------------------------------------------------
