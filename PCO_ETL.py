@@ -1,3 +1,9 @@
+### AUTHOR: Jace Alloway (Github jacealloway)
+###         For questions and inqurires related to the ETL code, please contact jacealloway@gmail.com.     
+###         API access is restricted to key holders. 
+### CODE VERSION: 2 
+###         See GitHub commit history for the description of updates.
+
 # Import packages 
 try:
     import numpy as np 
@@ -6,6 +12,7 @@ try:
     from datetime import date, datetime, timedelta
     import sys 
     import time 
+    from gc import collect 
     from tqdm import tqdm 
     from googleapiclient import discovery
     from google.oauth2 import service_account
@@ -72,11 +79,14 @@ def safeGET(url: str, auth: tuple, max_retries: int = 5, backoff_factor: float =
                     wait_time = backoff_factor * (2 ** attempt)
                 print(f"429 received for URL {url}. Waiting for {wait_time} seconds before retrying.")
                 time.sleep(wait_time)
+            elif response.status_code == 404:
+                raise Exception(f"404 received for URL {url}.")
             else:
                 if attempt == max_retries - 1:
                     raise
                 else:
                     time.sleep(backoff_factor * (2 ** attempt))
+
         except requests.exceptions.RequestException as e:
             if attempt == max_retries - 1:
                 raise
@@ -127,6 +137,20 @@ def getTimeGap(time1: str, time2: str) -> str:
     gap = str(dt.days).replace('-', '')  
         
     return str(gap)
+
+
+@timeFunction
+def dataframeCycle(dataframe: object, upload_engine: classmethod, sheet_name: str) -> None:
+    """
+    Creating a function to push the dataframe to the Google API then to dump the dataframe and garbage collect.
+    """
+    print(f"Pushing dataframe to Google sheet '{sheet_name}'.")
+    # 1. Push the dataframe 
+    upload_engine.pushData(dataframe, sheet_name = sheet_name)
+    # 2. Delete the dataframe 
+    del dataframe 
+    collect()
+    print(f'Dataframe removed successfully.')
 
 
 class GoogleAPIPush():
@@ -186,8 +210,6 @@ class GoogleAPIPush():
                     #####----- GET DATA FROM API -----#####
 
 
-
-
 class Exporter():
     def __init__(self, api_app_id: str, api_secret: str):
         self.auth = requests.auth.HTTPBasicAuth(api_app_id, api_secret)
@@ -196,8 +218,13 @@ class Exporter():
     def parseJSON(self, url: str) -> object:
         df = pd.DataFrame()
         while True:
-            response = safeGET(url = url, auth = self.auth)
-            response_flattened = pd.json_normalize(response.json())
+            try:
+                response = safeGET(url = url, auth = self.auth)
+                response_flattened = pd.json_normalize(response.json())
+            except:
+                print('Error fetching .json for {url}. Returning empty dataframe.')
+                response_flattened = pd.Dataframe()
+
             for i in response_flattened["data"]:
                 df = pd.concat([df, pd.json_normalize(i)], ignore_index = True)
 
@@ -912,47 +939,11 @@ class Exporter():
 
 
 
-print(f"----- Beginning PCO API fetch at {datetime.today()} -----")
-start_time = time.time()
-# GET ALL DATA
-_ENGINE_ = Exporter(api_app_id = API_APP_ID, api_secret = API_SECRET)
-
-# Extract workflow data
-DF_WFS = _ENGINE_.workflowDFGenerator()
-# Extract New People and everything else
-DF_NEW_PEOPLE = DF_WFS[DF_WFS['workflow_name'].str.contains('NEW', na = False)] # Filter in new people
-DF_WORKFLOWS = DF_WFS[~DF_WFS['workflow_name'].str.contains('NEW', na = False)] # Filter out new people 
-DF_WORKFLOWS = DF_WORKFLOWS[~DF_WORKFLOWS['workflow_name'].str.contains('BAPTISMS', na = False)] # Filter out baptisms
-
-# Extract team roster data
-DF_ROSTERS = _ENGINE_.rosterDFGenerator()
-
-# Extract group data 
-DF_GROUPS = _ENGINE_.groupDFGenerator()
-
-end_time = time.time()
-elapsed = end_time - start_time
-
-print(f"API fetched and processed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
 
 
 
 
-
-
-
-
-# Make a dictionary of all the dataframes and their respective sheet names on Google sheets for the data post
-dataframe_directory = {
-    'newpeople' : DF_NEW_PEOPLE, 
-    'workflows' : DF_WORKFLOWS, 
-    'planrosters' : DF_ROSTERS, 
-    'groups' : DF_GROUPS
-}
-
-
-
-                    #####----- PUSHING DATA TO GOOGLE SHEET -----#####
+#####----- PUSHING DATA TO GOOGLE SHEET -----#####
 
 # Load scopes and service account information from api key
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets',
@@ -960,15 +951,32 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets',
 SERVICE_ACCOUNT_JSON = f'/Users/jacealloway/Desktop/python/pco_access/apikey/service_account.json'
 SECRET = np.loadtxt(f'/Users/jacealloway/Desktop/python/pco_access/apikey/keys.txt', dtype = str)
 SPREADSHEET_ID = f"{SECRET[2]}" 
-
-
-start_time = time.time()
-
+# Generate the API push engine 
 _UPLOAD_ = GoogleAPIPush(SCOPES = SCOPES, SERVICE_ACCOUNT_JSON = SERVICE_ACCOUNT_JSON, SPREADSHEET_ID = SPREADSHEET_ID)
-for sheet, DF in tqdm(dataframe_directory.items(), desc = 'Pushing dataframes to Google sheets'):
-    _UPLOAD_.pushData(DF, sheet_name = sheet)
 
 
+
+print(f"----- Beginning PCO API fetch at {datetime.today()} -----")
+start_time = time.time()
+# GET ALL DATA
+_ENGINE_ = Exporter(api_app_id = API_APP_ID, api_secret = API_SECRET)
+# Extract workflow data
+DF_WFS = _ENGINE_.workflowDFGenerator()
+# Extract New People and everything else
+DF_NEW_PEOPLE = DF_WFS[DF_WFS['workflow_name'].str.contains('NEW', na = False)] # Filter in new people
+DF_WORKFLOWS = DF_WFS[~DF_WFS['workflow_name'].str.contains('NEW', na = False)] # Filter out new people 
+dataframeCycle(dataframe = DF_NEW_PEOPLE, upload_engine = _UPLOAD_, sheet_name = 'newpeople')
+dataframeCycle(dataframe = DF_WORKFLOWS, upload_engine = _UPLOAD_, sheet_name = 'workflows')
+# Extract team roster data
+DF_ROSTERS = _ENGINE_.rosterDFGenerator()
+dataframeCycle(dataframe = DF_ROSTERS, upload_engine = _UPLOAD_, sheet_name = 'planrosters')
+# Extract group data 
+DF_GROUPS = _ENGINE_.groupDFGenerator()
+dataframeCycle(dataframe = DF_GROUPS, upload_engine = _UPLOAD_, sheet_name = 'groups')
 end_time = time.time()
 elapsed = end_time - start_time
-print(f"Dataframe(s) pushed to Google sheets in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
+
+print(f"API fetched and processed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
+
+
+
