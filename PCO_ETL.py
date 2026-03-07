@@ -1,7 +1,7 @@
 ### AUTHOR: Jace Alloway (Github jacealloway)
 ###         For questions and inqurires related to the ETL code, please contact jacealloway@gmail.com.     
 ###         API access is restricted to key holders. 
-### CODE VERSION: 2 
+### CODE VERSION: 3
 ###         See GitHub commit history for the description of updates.
 
 # Import packages 
@@ -16,8 +16,15 @@ try:
     from tqdm import tqdm 
     from googleapiclient import discovery
     from google.oauth2 import service_account
+    import logging
+
+    logging.basicConfig(filename = 'LOG/PCO_ETL_log.txt', 
+                    filemode='w',
+                    level = logging.INFO, 
+                    format = '%(asctime)s - %(levelname)s - %(message)s'
+                    )
 except ModuleNotFoundError:
-    print("Ensure all packages are installed. Consult 'requirements.txt'.")
+    logging.error('ModuleNotFoundError: Ensure all packages are installed. Terminating.')
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -33,7 +40,7 @@ try:
     API_APP_ID = f"{SECRET[0]}"     
     API_SECRET = f"{SECRET[1]}"   
 except FileNotFoundError:
-    print('API Secret KEY not found. Terminating.')
+    logging.error('API Secret KEY not found. Terminating.')
     sys.exit()
 
 
@@ -44,6 +51,7 @@ EMAIL_BASE = 'https://api.planningcenteronline.com/people/v2/emails'
 CAMPUS_BASE = 'https://api.planningcenteronline.com/people/v2/campuses'
 WORKFLOW_BASE = 'https://api.planningcenteronline.com/people/v2/workflows'
 GROUPS_BASE = 'https://api.planningcenteronline.com/groups/v2'
+CHECKINS_BASE = 'https://api.planningcenteronline.com/check-ins/v2'
 
 
 def timeFunction(func):
@@ -55,7 +63,7 @@ def timeFunction(func):
         result = func(*args, **kwargs)
         end_time = time.time() 
         elapsed = end_time - start_time 
-        print(f"'{func.__name__}' executed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
+        logging.info(f"'{func.__name__}' executed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
         return result 
     return wrapper 
 
@@ -77,10 +85,12 @@ def safeGET(url: str, auth: tuple, max_retries: int = 5, backoff_factor: float =
                     wait_time = float(retry_after)
                 else:
                     wait_time = backoff_factor * (2 ** attempt)
-                print(f"429 received for URL {url}. Waiting for {wait_time} seconds before retrying.")
+                logging.warning(f"429 received for URL {url}. Waiting for {wait_time} seconds before retrying.")
                 time.sleep(wait_time)
             elif response.status_code == 404:
                 raise Exception(f"404 received for URL {url}.")
+            elif response.status_code == 401:
+                raise Exception(f"401 returned for URL {url}. User may not be authorized to access this URL.")
             else:
                 if attempt == max_retries - 1:
                     raise
@@ -139,18 +149,49 @@ def getTimeGap(time1: str, time2: str) -> str:
     return str(gap)
 
 
+def convertUTCEST(time: str) -> str:
+    """
+    Convert UTC timestamps to EST. Time difference is -5 hours from UTC to EST. 
+
+    Args: 
+        time: Input of format '%Y-%m-%dT%H:%M:%SZ' (str)
+
+    Returns: 
+        time: Output of format '%Y-%m-%dT%H:%M:%SZ' (str) with the -5 hour time difference included in the input 
+    """
+    # Define the format of the input strings which we want to preserve 
+    format = f'%Y-%m-%dT%H:%M:%SZ'
+    # Define the conversion factor
+    conversion = timedelta(hours = -5)
+
+    # Load the input into the correct datetime format 
+    input = datetime.strptime(time, format)
+    # Add the conversion factor 
+    EST_timestamp = input + conversion 
+    # Return the converted timestamp back to the initial timestamp format 
+    return_conversion = datetime.strftime(EST_timestamp, format)
+
+    return str(return_conversion)
+
+
+
+
 @timeFunction
 def dataframeCycle(dataframe: object, upload_engine: classmethod, sheet_name: str) -> None:
     """
     Creating a function to push the dataframe to the Google API then to dump the dataframe and garbage collect.
+
+    1. Push the dataframe to the respective Google sheet
+
+    2. Delete the dataframe to prevent memory errors 
     """
-    print(f"Pushing dataframe to Google sheet '{sheet_name}'.")
+    logging.info(f"Pushing dataframe to Google sheet '{sheet_name}'.")
     # 1. Push the dataframe 
     upload_engine.pushData(dataframe, sheet_name = sheet_name)
     # 2. Delete the dataframe 
     del dataframe 
     collect()
-    print(f'Dataframe removed successfully.')
+    logging.info(f'Dataframe removed successfully.')
 
 
 class GoogleAPIPush():
@@ -196,9 +237,7 @@ class GoogleAPIPush():
         # try:
         self.sheetClear(sheet_name)
         self.sheetPush(DATAFRAME.fillna(''), sheet_name)
-        print(f'Dataframe pushed successfully to {sheet_name}.')
-        # except errors.HttpError:
-        #     print("Google sheet name range inconsistent with requested.")
+        logging.info(f'Dataframe pushed successfully to {sheet_name}.')
         
 
 
@@ -222,8 +261,8 @@ class Exporter():
                 response = safeGET(url = url, auth = self.auth)
                 response_flattened = pd.json_normalize(response.json())
             except:
-                print('Error fetching .json for {url}. Returning empty dataframe.')
-                response_flattened = pd.Dataframe()
+                logging.error('Error fetching .json for {url}. Returning empty dataframe.')
+                response_flattened = pd.DataFrame()
 
             for i in response_flattened["data"]:
                 df = pd.concat([df, pd.json_normalize(i)], ignore_index = True)
@@ -243,16 +282,20 @@ class Exporter():
         # DATA LOADING AND REFINING ---------------------------------------------------------------------------------------------------------------------
 
         #Fetch primary API data
-        pbar = tqdm(total = 4, desc = 'Fetching workflows API JSON')
-        DF_WORKFLOWS = self.parseJSON(WORKFLOW_BASE)
-        pbar.update(1)
-        DF_CAMPUSES = self.parseJSON(CAMPUS_BASE)
-        pbar.update(1)
-        DF_PEOPLE = self.parseJSON(PEOPLE_BASE+'?per_page=100')
-        pbar.update(1)
-        DF_EMAILS = self.parseJSON(EMAIL_BASE+'?per_page=100')
-        pbar.update(1)
-        pbar.close()
+        try:
+            pbar = tqdm(total = 4, desc = 'Fetching workflows API JSON')
+            DF_WORKFLOWS = self.parseJSON(WORKFLOW_BASE)
+            pbar.update(1)
+            DF_CAMPUSES = self.parseJSON(CAMPUS_BASE)
+            pbar.update(1)
+            DF_PEOPLE = self.parseJSON(PEOPLE_BASE+'?per_page=100')
+            pbar.update(1)
+            DF_EMAILS = self.parseJSON(EMAIL_BASE+'?per_page=100')
+            pbar.update(1)
+            pbar.close()
+            logging.info('Workflow primary API data fetched successfully.')
+        except:
+            logging.error('Error fetching workflow primary API data.')
                 
 
         # Filtering
@@ -455,9 +498,9 @@ class Exporter():
                 card_id = DF_ALL_DATA['card_id'].values[i]
                 current_sequence = DF_ALL_DATA['current_step_sequence'].values[i]
 
-                card_created_at = reformatTimestring(DF_ALL_DATA['card_created_at'].values[i])
-                moved_to_step_at = reformatTimestring(DF_ALL_DATA['moved_to_step_at'].values[i])
-                log_created_at = reformatTimestring(DF_ALL_DATA['log_created_at'].values[i])
+                card_created_at = reformatTimestring(convertUTCEST(DF_ALL_DATA['card_created_at'].values[i]))
+                moved_to_step_at = reformatTimestring(convertUTCEST(DF_ALL_DATA['moved_to_step_at'].values[i]))
+                log_created_at = reformatTimestring(convertUTCEST(DF_ALL_DATA['log_created_at'].values[i]))
 
                 DF_ALL_DATA['card_created_at'].values[i] = card_created_at # Overwrite the card creation date value with the right format
 
@@ -576,18 +619,22 @@ class Exporter():
     def groupDFGenerator(self) -> object:
         # DATA LOADING AND REFINING ---------------------------------------------------------------------------------------------------------------------
 
-        pbar = tqdm(total = 5, desc = 'Fetching groups API JSON')
-        DF_GROUPTYPE = self.parseJSON(GROUPS_BASE+'/'+'group_types')
-        pbar.update(1)
-        DF_EVENTS = self.parseJSON(GROUPS_BASE + '/' + 'events')
-        pbar.update(1)
-        DF_GROUPS_PEOPLE = self.parseJSON(GROUPS_BASE + '/' + 'people')
-        pbar.update(1)
-        DF_CAMPUSES = self.parseJSON(GROUPS_BASE + '/' + 'campuses')
-        pbar.update(1)
-        DF_GROUPS = self.parseJSON(GROUPS_BASE + '/' + 'groups')
-        pbar.update(1)
-        pbar.close()
+        try:
+            pbar = tqdm(total = 5, desc = 'Fetching groups API JSON')
+            DF_GROUPTYPE = self.parseJSON(GROUPS_BASE+'/'+'group_types')
+            pbar.update(1)
+            DF_EVENTS = self.parseJSON(GROUPS_BASE + '/' + 'events')
+            pbar.update(1)
+            DF_GROUPS_PEOPLE = self.parseJSON(GROUPS_BASE + '/' + 'people')
+            pbar.update(1)
+            DF_CAMPUSES = self.parseJSON(GROUPS_BASE + '/' + 'campuses')
+            pbar.update(1)
+            DF_GROUPS = self.parseJSON(GROUPS_BASE + '/' + 'groups')
+            pbar.update(1)
+            pbar.close()
+            logging.info('Groups primary API fetch successful.')
+        except:
+            logging.error('Error fetching groups primary API data.')
 
 
         DF_CAMPUSES_REFINED = DF_CAMPUSES[['id', 'attributes.name']]
@@ -596,6 +643,7 @@ class Exporter():
         DF_EVENTS_REFINED = DF_EVENTS[['id', 'attributes.name', 'attributes.visitors_count', 'relationships.group.data.id', 'attributes.starts_at']]
         DF_GROUPS_PEOPLE_REFINED = DF_GROUPS_PEOPLE[['id', 'attributes.first_name', 'attributes.last_name', 'attributes.phone_numbers', 'attributes.email_addresses']]
 
+        
         DF_GROUPS_BY_CAMPUS = pd.DataFrame() 
         for campus_id in tqdm(DF_CAMPUSES['id'].values, "Fetching groups by campus"):
             req_url = GROUPS_BASE + f'/campuses/{campus_id}/groups'
@@ -607,6 +655,7 @@ class Exporter():
             
         # Filter out unused columns
         DF_GROUPS_BY_CAMPUS_REFINED = DF_GROUPS_BY_CAMPUS[['id', 'campus_id']]
+
 
         DF_MEMBERSHIPS = pd.DataFrame() 
         DF_GROUP_TAGS = pd.DataFrame()
@@ -623,10 +672,10 @@ class Exporter():
         DF_MEMBERSHIPS_REFINED = DF_MEMBERSHIPS[['attributes.joined_at', 'relationships.group.data.id', 'relationships.person.data.id']]
         DF_GROUP_TAGS_REFINED = DF_GROUP_TAGS[['attributes.name', 'group_id']]
 
-            
+
         # Fetch all event attendances - note that any null event ID is dropped (there is no event, no attendance, and it doesn't exist so we cannot pull it)
         DF_ATTENDANCES = pd.DataFrame()
-        for event_id in tqdm(DF_EVENTS_REFINED['id'].values, "Fetching events data"):
+        for event_id in tqdm(DF_EVENTS_REFINED['id'].values, "Fetching event attendances data"):
             req_url = GROUPS_BASE + f'/events/{event_id}/attendances'
             DF_ATTENDANCES = pd.concat([DF_ATTENDANCES, self.parseJSON(req_url)])
 
@@ -640,8 +689,8 @@ class Exporter():
 
 
         # JOINS ---------------------------------------------------------------------------------------------------------------------
-        DF_GROUP_TYPES = pd.merge(DF_GROUPTYPE_REFINED, DF_GROUPS_REFINED, how = 'left', left_on = 'id', right_on = 'relationships.group_type.data.id')
-        DF_EVENTS_GROUPS = pd.merge(DF_GROUP_TYPES, DF_EVENTS_REFINED, how = 'left', left_on = 'id_y', right_on = 'relationships.group.data.id')
+        DF_GROUP_TYPES = pd.merge(DF_GROUPTYPE_REFINED, DF_GROUPS_REFINED, how = 'inner', left_on = 'id', right_on = 'relationships.group_type.data.id')
+        DF_EVENTS_GROUPS = pd.merge(DF_GROUP_TYPES, DF_EVENTS_REFINED, how = 'inner', left_on = 'id_y', right_on = 'relationships.group.data.id')
         # Renaming the dropping columns for a cleaner table 
         DF_EVENTS_GROUPS.rename(columns={'id_x' : 'group_type_id',
                                          'attributes.name_x' : 'group_type', 
@@ -657,7 +706,7 @@ class Exporter():
                                         }, inplace = True)
         # Drop keep only used columns
         DF_EVENTS_GROUPS = DF_EVENTS_GROUPS[['group_type_id', 'group_type', 'group_id', 'group_name', 'member_count', 'event_id', 'event_name', 'visitor_count', 'event_starts_at', 'group_archived_at', 'group_created_at']]
-       
+        
        
         DF_GROUPS_AND_CAMPUSES = pd.merge(DF_GROUPS_BY_CAMPUS_REFINED, DF_CAMPUSES_REFINED, how = 'left', left_on = 'campus_id', right_on = 'id')
         # Renaming 
@@ -667,14 +716,15 @@ class Exporter():
         # Drop unused columns 
         DF_GROUPS_AND_CAMPUSES = DF_GROUPS_AND_CAMPUSES[['group_id', 'campus_id', 'campus_name']]
 
-
-
+    
         DF_ALL_GROUP_EVENTS = pd.merge(DF_EVENTS_GROUPS, DF_GROUPS_AND_CAMPUSES, how = 'left', left_on = 'group_id', right_on = 'group_id')
         # No need to drop unused columns or rename, as this was already done 
 
 
 
-        DF_GROUP_EVENT_ATTENDANCES_ALL = pd.merge(DF_ALL_GROUP_EVENTS, DF_ATTENDANCES_REFINED, how = 'inner', left_on = 'event_id', right_on = 'relationships.event.data.id')
+        DF_GROUP_EVENT_ATTENDANCES_ALL = pd.merge(DF_ALL_GROUP_EVENTS, DF_ATTENDANCES_REFINED, how = 'left', left_on = 'event_id', right_on = 'relationships.event.data.id')
+        DF_GROUP_EVENT_ATTENDANCES_ALL.to_csv('TEMP_FILES/debug_GR_DF_GROUP_EVENT_ATTENDANCES_ALL.csv')
+        
         # Renaming 
         DF_GROUP_EVENT_ATTENDANCES_ALL.rename(columns = {'attributes.attended' : 'attended_ind', 
                                                          'relationships.person.data.id' : 'person_id', 
@@ -684,8 +734,6 @@ class Exporter():
         DF_GROUP_EVENT_ATTENDANCES_ALL = DF_GROUP_EVENT_ATTENDANCES_ALL[['attended_ind', 'person_id', 'role', 'group_type_id', 'group_type', 'group_id', 'group_name', 'member_count', 'event_id', 'event_name', 'visitor_count', 'event_starts_at', 'campus_id', 'campus_name', 'group_archived_at', 'group_created_at']]
  
         
-
-
         DF_MEMBERSHIPS_PEOPLE = pd.merge(DF_MEMBERSHIPS_REFINED, DF_GROUPS_PEOPLE_REFINED, how = 'left', left_on = 'relationships.person.data.id', right_on = 'id')
         # Rename 
         DF_MEMBERSHIPS_PEOPLE.rename(columns = {'attributes.joined_at' : 'joined_at', 
@@ -711,9 +759,6 @@ class Exporter():
         # Rename
         DF_GROUPS_ALL.rename(columns = {'attributes.name' : 'tag'}, inplace = True)
         
-
-
-
 
         # FINAL DATAFRAME PROCESSING -------------------------------------------------------------------------------------------------------------------
         # Drop all columns where group_id is null, since we just did a full outer join 
@@ -749,28 +794,28 @@ class Exporter():
 
             # Process the dates, and account for null values (e.g. if a group has not been archived)
             try:
-                DF_GROUPS_ALL['group_archived_at'].values[i] = reformatTimestring(DF_GROUPS_ALL['group_archived_at'].values[i])
+                DF_GROUPS_ALL['group_archived_at'].values[i] = reformatTimestring(convertUTCEST(DF_GROUPS_ALL['group_archived_at'].values[i]))
                 DF_GROUPS_ALL['group_archived_at_week_end'].values[i] = weekEndSunday(DF_GROUPS_ALL['group_archived_at'].values[i])
             except:
                 DF_GROUPS_ALL['group_archived_at'].values[i] = ''
                 DF_GROUPS_ALL['group_archived_at_week_end'].values[i] = ''
 
             try:
-                DF_GROUPS_ALL['group_created_at'].values[i] = reformatTimestring(DF_GROUPS_ALL['group_created_at'].values[i])
+                DF_GROUPS_ALL['group_created_at'].values[i] = reformatTimestring(convertUTCEST(DF_GROUPS_ALL['group_created_at'].values[i]))
                 DF_GROUPS_ALL['group_created_at_week_end'].values[i] = weekEndSunday(DF_GROUPS_ALL['group_created_at'].values[i])
             except: 
                 DF_GROUPS_ALL['group_created_at'].values[i] = ''
                 DF_GROUPS_ALL['group_created_at_week_end'].values[i] = ''
 
             try: 
-                DF_GROUPS_ALL['event_starts_at'].values[i] = reformatTimestring(DF_GROUPS_ALL['event_starts_at'].values[i])
+                DF_GROUPS_ALL['event_starts_at'].values[i] = reformatTimestring(convertUTCEST(DF_GROUPS_ALL['event_starts_at'].values[i]))
                 DF_GROUPS_ALL['event_starts_at_week_end'].values[i] = weekEndSunday(DF_GROUPS_ALL['event_starts_at'].values[i])
             except: 
                 DF_GROUPS_ALL['event_starts_at'].values[i] = ''
                 DF_GROUPS_ALL['event_starts_at_week_end'].values[i] = ''
             
             try:
-                DF_GROUPS_ALL['joined_at'].values[i] = reformatTimestring(DF_GROUPS_ALL['joined_at'].values[i])
+                DF_GROUPS_ALL['joined_at'].values[i] = reformatTimestring(convertUTCEST(DF_GROUPS_ALL['joined_at'].values[i]))
                 DF_GROUPS_ALL['joined_at_week_end'].values[i] = weekEndSunday(DF_GROUPS_ALL['joined_at'].values[i])
             except:
                 DF_GROUPS_ALL['joined_at'].values[i] = ''
@@ -816,14 +861,18 @@ class Exporter():
     def rosterDFGenerator(self) -> object:
         # DATA LOADING AND REFINING ---------------------------------------------------------------------------------------------------------------------
 
-        pbar = tqdm(total = 3, desc = 'Fetching roster API JSON')
-        DF_SERVICE_TYPES = self.parseJSON(SERVICES_BASE + '/' + 'service_types')
-        pbar.update(1)
-        DF_TEAMS = self.parseJSON(SERVICES_BASE + '/' + 'teams')
-        pbar.update(1)
-        DF_ROSTER_PEOPLE = self.parseJSON(SERVICES_BASE + '/' + 'people')
-        pbar.update(1)
-        pbar.close()
+        try:
+            pbar = tqdm(total = 3, desc = 'Fetching roster API JSON')
+            DF_SERVICE_TYPES = self.parseJSON(SERVICES_BASE + '/' + 'service_types')
+            pbar.update(1)
+            DF_TEAMS = self.parseJSON(SERVICES_BASE + '/' + 'teams')
+            pbar.update(1)
+            DF_ROSTER_PEOPLE = self.parseJSON(SERVICES_BASE + '/' + 'people')
+            pbar.update(1)
+            pbar.close()
+            logging.info('Roster primary API fetch successful.')
+        except: 
+            logging.error('Error fetching roster primary API data.')
 
 
         # Get the Sunday service rosters 
@@ -933,6 +982,159 @@ class Exporter():
 
         return DF_ALL_ROSTERS
 
+    ## THIS FUNCTION IS STILL IN DEVELOPMENT ##
+    @timeFunction 
+    def checkinsDFGenerator(self) -> object:
+        # # REINSTATE ONCE COMPLETE
+        # pbar = tqdm(total = 6, desc = 'Fetching check-ins API JSON')
+
+        # DF_CI_EVENTS = self.parseJSON(CHECKINS_BASE + '/' + 'events')
+        # pbar.update(1)
+        # DF_CI_EVENTTIMES = self.parseJSON(CHECKINS_BASE + '/' + 'event_times')
+        # pbar.update(1)
+        # DF_CI_CAMPUSES = self.parseJSON(CHECKINS_BASE + '/' + 'campuses')
+        # pbar.update(1)
+        # DF_CI_PEOPLE = self.parseJSON(CHECKINS_BASE + '/' + 'people')
+        # pbar.update(1)
+        # DF_CI_HEADCOUNTS = self.parseJSON(CHECKINS_BASE + '/' + 'headcounts')
+        # pbar.update(1)
+        # DF_CI_CHECKIN_PERSON = self.parseJSON(CHECKINS_BASE + '/' + 'check_ins')
+        # pbar.update(1)
+
+        # pbar.close()
+
+        # DELETE ONCE COMPLETE
+        DF_CI_EVENTS = pd.read_csv('TEMP_FILES/DF_CI_EVENTS.csv')
+        DF_CI_EVENTTIMES = pd.read_csv('TEMP_FILES/DF_CI_EVENTTIMES.csv')
+        DF_CI_CAMPUSES = pd.read_csv('TEMP_FILES/DF_CI_CAMPUSES.csv')
+        DF_CI_PEOPLE = pd.read_csv('TEMP_FILES/DF_CI_PEOPLE.csv')
+        DF_CI_HEADCOUNTS = pd.read_csv('TEMP_FILES/DF_CI_HEADCOUNTS.csv')
+        DF_CI_CHECKIN = pd.read_csv('TEMP_FILES/DF_CI_CHECKIN_PERSON.csv')
+        DF_CI_EVENTPERIODS = pd.read_csv('TEMP_FILES/DF_CI_EVENTPERIODS.csv')
+
+        # # REINSTATE ONCE COMPLETE
+        # DF_CI_EVENTPERIODS = pd.DataFrame()
+        # for event_id in tqdm(DF_CI_EVENTS['id'].values, "Fetching event periods for all CI events"):
+        #     req_url = CHECKINS_BASE + '/' + f'events/{event_id}/event_periods'
+        #     DF_CI_EVENTPERIODS = pd.concat([DF_CI_EVENTPERIODS, self.parseJSON(req_url)])
+
+
+
+
+        # Script to write campus information onto the events list 
+        DF_CI_EVENTS['campus_name'] = 'N/A'
+        for i in tqdm(range(len(DF_CI_EVENTS.index)), desc = 'Writing campus data onto events'):
+            campus_data = DF_CI_EVENTS['relationships.campuses.data'].values[i][0] # Note here you are indexing [0] to access a nested dict
+            event_name = DF_CI_EVENTS['attributes.name'].values[i]
+
+            # if len(campus_data) > 0:
+            #     campus_name = DF_CI_CAMPUSES[DF_CI_CAMPUSES['id'] == campus_data['id'].values[0]].values[0]
+
+            # # This is temporary until we can associate permanent campuses to the events 
+            # else: 
+            if ('HAM' in event_name) or ('hamilton' in event_name.casefold()):
+                campus_name = 'Hamilton'
+            elif ('DT' in event_name) or ('downtown' in event_name.casefold()):
+                campus_name = 'Downtown'
+            elif ('MT' in event_name) or ('midtown'in event_name.casefold()):
+                campus_name = 'Midtown'
+            else:
+                campus_name = ''
+
+            DF_CI_EVENTS['campus_name'].values[i] = campus_name
+
+
+
+        # Filtering 
+        DF_CI_EVENTS_REFINED = DF_CI_EVENTS[['id', 'campus_name', 'attributes.name', 'attributes.frequency']]
+        DF_CI_EVENTPERIODS_REFINED = DF_CI_EVENTPERIODS[['id', 'relationships.event.data.id', 'attributes.starts_at', 'attributes.ends_at', 'attributes.regular_count', 'attributes.guest_count', 'attributes.volunteer_count']]
+        DF_CI_EVENTTIMES_REFINED = DF_CI_EVENTTIMES[['id', 'attributes.name', 'relationships.event.data.id', 'relationships.event_period.data.id', 'attributes.starts_at', 'attributes.total_count', 'attributes.regular_count', 'attributes.volunteer_count', 'attributes.guest_count']]
+        DF_CI_CAMPUSES_REFINED = DF_CI_CAMPUSES[['id', 'attributes.name']]
+        DF_CI_PEOPLE_REFINED = DF_CI_PEOPLE[['id', 'attributes.birthdate', 'attributes.gender', 'attributes.grade',  'attributes.first_name', 'attributes.last_name', 'attributes.last_checked_in_at', 'attributes.check_in_count', 'attributes.child']]
+        DF_CI_HEADCOUNTS_REFINED = DF_CI_HEADCOUNTS[['id', 'attributes.total', 'relationships.event_time.data.id']]
+        DF_CI_CHECKIN_REFINED = DF_CI_CHECKIN[['id', 'relationships.person.data.id', 'relationships.event_period.data.id', 'attributes.created_at', 'attributes.checked_out_at', 'attributes.one_time_guest']]
+
+
+
+
+
+
+        # EXECUTE JOINS ---------------------------------------------------------------------------------------------------------------------
+ 
+        DF_CI_EVENTS_EVENT_PERIODS = pd.merge(DF_CI_EVENTS_REFINED, DF_CI_EVENTPERIODS_REFINED, how = 'inner', left_on = 'id', right_on = 'relationships.event.data.id')
+        # Rename columns 
+        DF_CI_EVENTS_EVENT_PERIODS.rename(columns = {
+                'id_x' : 'event_id',
+                'id_y' : 'event_period_id',
+                'relationships.campuses.data' : 'campus_data', 
+                'attributes.name' : 'event_name', 
+                'attributes.frequency' : 'event_frequency', 
+                'attributes.starts_at' : 'event_period_starts_at', 
+                'attributes.ends_at' : 'event_period_ends_at', 
+                'attributes.regular_count' : 'event_period_regular_count', 
+                'attributes.guest_count' : 'event_period_guest_count' 
+        }, inplace = True)
+        # Isolate the columns needed 
+        DF_CI_EVENTS_EVENT_PERIODS = DF_CI_EVENTS_EVENT_PERIODS[['event_id', 'event_period_id', 'campus_name', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count']]
+        
+        
+        
+        DF_CI_EVENTS_ALL = pd.merge(DF_CI_EVENTS_EVENT_PERIODS, DF_CI_EVENTTIMES_REFINED, how = 'left', left_on = 'event_period_id', right_on = 'relationships.event_period.data.id')
+        # Rename columns 
+        DF_CI_EVENTS_ALL.rename(columns = {
+                'id' : 'eventtime_id',
+                'attributes.name' : 'eventtime_name', 
+                'attributes.starts_at' : 'eventtime_starts_at',
+                'attributes.total_count' : 'eventtime_total_count', 
+                'attributes.regular_count' : 'eventtime_regular_count', 
+                'attributes.volunteer_count' : 'eventtime_volunteer_count', 
+                'attributes.guest_count' : 'eventtime_guest_count'
+        }, inplace = True)
+        # Order and isolate the columns needed
+        DF_CI_EVENTS_ALL = DF_CI_EVENTS_ALL[['event_id', 'event_period_id', 'campus_name', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count', 'eventtime_id', 'eventtime_name', 'eventtime_starts_at', 'eventtime_total_count', 'eventtime_regular_count', 'eventtime_volunteer_count', 'eventtime_guest_count']]
+
+
+        
+        DF_CI_EVENTS_HEADCOUNTS_ALL = pd.merge(DF_CI_EVENTS_ALL, DF_CI_HEADCOUNTS_REFINED, how = 'left', left_on = 'eventtime_id', right_on = 'relationships.event_time.data.id')
+        # Rename columns 
+        DF_CI_EVENTS_HEADCOUNTS_ALL.rename(columns = {
+            'id' : 'headcount_id', 
+            'attributes.total' : 'headcount_total', 
+        }, inplace = True)
+        # Isolate the columns needed 
+        DF_CI_EVENTS_HEADCOUNTS_ALL = DF_CI_EVENTS_HEADCOUNTS_ALL[['event_id', 'event_period_id', 'campus_name', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count', 'eventtime_id', 'eventtime_name', 'eventtime_starts_at', 'eventtime_total_count', 'eventtime_regular_count', 'eventtime_volunteer_count', 'eventtime_guest_count', 'headcount_id', 'headcount_total']]
+
+        
+        DF_CI_CHECKIN_PERSON = pd.merge(DF_CI_CHECKIN_REFINED, DF_CI_PEOPLE_REFINED, how = 'left', left_on = 'relationships.person.data.id', right_on = 'id')
+        # Rename columns 
+        DF_CI_CHECKIN_PERSON.rename(columns = {
+            'id_x' : 'checkin_id', 
+            'id_y' : 'person_id', 
+            'relationships.event_period.data.id' : 'event_period_id', 
+            'attributes.created_at' : 'checked_in_at', 
+            'attributes.checked_out_at' : 'checked_out_at', 
+            'attributes.one_time_guest' : 'one_time_guest', 
+            'attributes.birthdate' : 'birthdate', 
+            'attributes.gender' : 'gender', 
+            'attributes.grade' : 'grade', 
+            'attributes.first_name' : 'first_name', 
+            'attributes.last_name' : 'last_name', 
+            'attributes.last_checked_in_at' : 'last_checked_in_at', 
+            'attributes.check_in_count' : 'check_in_count', 
+            'attributes.child' : 'child_bool'
+        }, inplace = True)
+        # Isolate and order the needed columns 
+        DF_CI_CHECKIN_PERSON = DF_CI_CHECKIN_PERSON[['checkin_id', 'person_id', 'event_period_id', 'checked_in_at', 'checked_out_at', 'last_checked_in_at', 'check_in_count', 'one_time_guest', 'first_name', 'last_name', 'birthdate', 'grade', 'gender', 'child_bool']]
+
+        
+
+        # Final master join here; no more renaming required since column names are all unique 
+        DF_CI_ALL = pd.merge(DF_CI_CHECKIN_PERSON, DF_CI_EVENTS_HEADCOUNTS_ALL, how = 'inner', left_on = 'event_period_id', right_on = 'event_period_id')
+        # DF_CI_ALL.to_csv('TEMP_FILES/DF_CI_ALL.csv')
+
+
+
+        # PROCESS ALL DATES AND BIRTHDAYS
 
 
 
@@ -943,40 +1145,46 @@ class Exporter():
 
 
 
-#####----- PUSHING DATA TO GOOGLE SHEET -----#####
-
-# Load scopes and service account information from api key
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets',
-           'https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_JSON = f'/Users/jacealloway/Desktop/python/pco_access/apikey/service_account.json'
-SECRET = np.loadtxt(f'/Users/jacealloway/Desktop/python/pco_access/apikey/keys.txt', dtype = str)
-SPREADSHEET_ID = f"{SECRET[2]}" 
-# Generate the API push engine 
-_UPLOAD_ = GoogleAPIPush(SCOPES = SCOPES, SERVICE_ACCOUNT_JSON = SERVICE_ACCOUNT_JSON, SPREADSHEET_ID = SPREADSHEET_ID)
 
 
+# Add importer construct for other files 
+if __name__ == "__main__": 
+    #####----- PUSHING DATA TO GOOGLE SHEET -----#####
 
-print(f"----- Beginning PCO API fetch at {datetime.today()} -----")
-start_time = time.time()
-# GET ALL DATA
-_ENGINE_ = Exporter(api_app_id = API_APP_ID, api_secret = API_SECRET)
-# Extract workflow data
-DF_WFS = _ENGINE_.workflowDFGenerator()
-# Extract New People and everything else
-DF_NEW_PEOPLE = DF_WFS[DF_WFS['workflow_name'].str.contains('NEW', na = False)] # Filter in new people
-DF_WORKFLOWS = DF_WFS[~DF_WFS['workflow_name'].str.contains('NEW', na = False)] # Filter out new people 
-dataframeCycle(dataframe = DF_NEW_PEOPLE, upload_engine = _UPLOAD_, sheet_name = 'newpeople')
-dataframeCycle(dataframe = DF_WORKFLOWS, upload_engine = _UPLOAD_, sheet_name = 'workflows')
-# Extract team roster data
-DF_ROSTERS = _ENGINE_.rosterDFGenerator()
-dataframeCycle(dataframe = DF_ROSTERS, upload_engine = _UPLOAD_, sheet_name = 'planrosters')
-# Extract group data 
-DF_GROUPS = _ENGINE_.groupDFGenerator()
-dataframeCycle(dataframe = DF_GROUPS, upload_engine = _UPLOAD_, sheet_name = 'groups')
-end_time = time.time()
-elapsed = end_time - start_time
-
-print(f"API fetched and processed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
+    # Load scopes and service account information from api key
+    SCOPES = ['https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive']
+    SERVICE_ACCOUNT_JSON = f'/Users/jacealloway/Desktop/python/pco_access/apikey/service_account.json'
+    SECRET = np.loadtxt(f'/Users/jacealloway/Desktop/python/pco_access/apikey/keys.txt', dtype = str)
+    SPREADSHEET_ID = f"{SECRET[2]}" 
+    # Generate the API push engine 
+    _UPLOAD_ = GoogleAPIPush(SCOPES = SCOPES, SERVICE_ACCOUNT_JSON = SERVICE_ACCOUNT_JSON, SPREADSHEET_ID = SPREADSHEET_ID)
 
 
 
+
+
+    logging.info(f"----- Beginning PCO API fetch at {datetime.today()} -----")
+    start_time = time.time()
+    # GET ALL DATA
+    _ENGINE_ = Exporter(api_app_id = API_APP_ID, api_secret = API_SECRET)
+
+
+    # EXTRACT WORKFLOW DATA 
+    DF_WFS = _ENGINE_.workflowDFGenerator()
+    dataframeCycle(dataframe = DF_WFS, upload_engine = _UPLOAD_, sheet_name = 'workflows')
+
+
+    # EXTRACT TEAM ROSTERING DATA 
+    DF_ROSTERS = _ENGINE_.rosterDFGenerator()
+    dataframeCycle(dataframe = DF_ROSTERS, upload_engine = _UPLOAD_, sheet_name = 'planrosters')
+
+    
+    # EXTRACT GROUP DATA 
+    DF_GROUPS = _ENGINE_.groupDFGenerator()
+    dataframeCycle(dataframe = DF_GROUPS, upload_engine = _UPLOAD_, sheet_name = 'groups')
+
+
+    end_time = time.time()
+    elapsed = end_time - start_time
+    logging.info(f"API fetched and processed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")

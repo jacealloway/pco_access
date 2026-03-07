@@ -207,9 +207,9 @@ GROUPS MAPPING:
 
         ----- Description -----                             ----- Join Action -----------------------------------------------------                                     ----- Join-On Variable -----
        |                       |                           |                                                                       |                                   |                            |  
-        Groups -> Grouptype                                 Grouptype LEFT JOIN Groups:     Only include coach and connect groups                                       Grouptype ID    
+        Groups -> Grouptype                                 Grouptype INNER JOIN Groups:     Only include coach and connect groups                                       Grouptype ID    
 
-        Events -> Grouptype+Groups                          Grouptype/Groups LEFT JOIN Events:     Events are under group ID                                            Group ID
+        Events -> Grouptype+Groups                          Grouptype/Groups INNER JOIN Events:     Every event has a group ID / type                                            Group ID
 
                                             ---------------------------------------------------------------------------
                                                 DF_EVENTS_GROUPS should now include: 
@@ -333,6 +333,9 @@ PLANS DEFINED DATAFRAME DIRECTORY:
             attributes.passed_background_check      |           Boolean of whether person has passed VSC
 
 
+
+
+
 PLANS MAPPING:
 
         ----- Description -----                             ----- Join Action -----------------------------------------------------                                     ----- Join-On Variable -----
@@ -362,3 +365,169 @@ PLANS MAPPING:
                                                         'scheduler_name', 'servicetype_name', 
                                                         'team_name', 'plan_date'    
                                             ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CHECK-INS DEFINED DATAFRAME DIRECTORY: 
+
+        DF_CI_EVENTS_REFINED.columns 
+                id                                  |           ID of event 
+                relationships.campuses.data         |           Campus data for the event (ID and Name, in a list format)
+                attributes.name                     |           Name of event 
+                attributes.frequency                |           Event frequency (weekly, daily, etc.)
+
+
+        DF_CI_EVENTPERIODS.columns 
+                id                                  |           ID of event period 
+                relationships.event.data.id         |           ID of associated event 
+                attributes.starts_at                |           Timestamp of event period window start 
+                attributes.end_at                   |           Timestamp of event period window end 
+                attributes.regular_count            |           Regular (child) count checked-in during the event period window 
+                attributes.guest_count              |           Guest count checked-in during the event period window 
+            
+
+        DF_CI_EVENTTIMES_REFINED.columns 
+                id                                  |           ID of event time 
+                attributes.name                     |           Name of event time 
+                relationships.event.data.id         |           ID of associated event 
+                relationships.event_period.data.id  |           ID of associated event period 
+                attributes.starts_at                |           Timestamp of the eventtime start       
+                attributes.total_count              |           Total count of individuals checked-in during the event period
+                attributes.regular_count            |           Regular (child) count checked-in during the event period
+                attributes.volunteer_count          |           Volunteer count checked-in during the event period 
+                attributes.guest_count              |           Guest count checked-in during the event period 
+
+
+        DF_CI_CAMPUSES_REFINED.columns
+                id                                  |           ID of campus
+                attributes.name                     |           Name of campus 
+
+
+        DF_CI_PEOPLE_REFINED.columns 
+                id                                  |           ID of person 
+                attributes.birthdate                |           Timestamp of person birthdate 
+                attributes.gender                   |           Person gender 
+                attributes.grade                    |           School grade which child is associated with 
+                attributes.first_name               |           First name of person 
+                attributes.last_name                |           Last name of person 
+                attributes.last_checked_in_at       |           Timestamp of the last time a person was checked-in at 
+                attributes.check_in_count           |           Count of how many events a person has been checked-in to 
+                attributes.child                    |           Boolean child indicator (True/False)
+
+
+        DF_CI_HEADCOUNTS_REFINED.columns 
+                id                                  |           ID of headcount 
+                attributes.total                    |           Count of total during an event time 
+                relationships.event_time.data.id    |           ID of associated event time 
+
+
+        DF_CI_CHECKIN_REFINED.columns
+                id                                  |           ID of check-in 
+                relationships.person.data.id        |           ID of person associated with the check-in 
+                relationships.event_period_data.id  |           ID of event period associated with the check-in 
+                attributes.created_at               |           Timestamp of when the person was checked-in 
+                attributes.checked_out_at           |           Timestamp of when the person was checked-out at     
+                attributes.one_time_guest           |           Boolean indicating if the person is a one-time-guest attending the event 
+
+
+
+
+CHECK-INS MAPPING:
+
+        ----- Description -----                             ----- Join Action -----------------------------------------------------                                     ----- Join-On Variable -----
+       |                       |                           |                                                                       |                                   |                            |  
+
+        Campus -> Events                                    Events LEFT JOIN / CREATE Campus                                                                            Campus ID / where 'CAMPUS' in 'NAME'
+
+        Event Periods -> Events                             Events INNER JOIN Event Periods:   Not every event may contain valid event periods                          Event ID 
+
+        Event Times -> Event Periods + Events               Event Periods and Events LEFT JOIN Event Times:   Join all event times associated with each event period    Event Period ID
+
+        Headcounts -> All Events                            All Events LEFT JOIN Headcounts:    Not every event time may have a headcount                               Event Time ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_CI_EVENTS_HEADCOUNTS_ALL should now include: 
+                                                        'event_id', 'event_period_id', 'campus_name', 'event_name',
+                                                        'event_frequency', 'event_period_starts_at', 'event_period_ends_at',
+                                                        'event_period_regular_count', 'event_period_guest_count',
+                                                        'eventtime_id', 'eventtime_name', 'eventtime_starts_at',
+                                                        'eventtime_total_count', 'eventtime_regular_count',
+                                                        'eventtime_volunteer_count', 'eventtime_guest_count', 
+                                                        'headcount_id', 'headcount_total'   
+                                            ---------------------------------------------------------------------------
+
+        Person -> Check-In                                  Check-In LEFT JOIN Person:  Every check-in has an associated person profile                                 Person ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_CI_CHECKIN_PERSON should now include: 
+                                                        'checkin_id', 'person_id', 'event_period_id', 'checked_in_at',
+                                                        'checked_out_at', 'last_checked_in_at', 'check_in_count',
+                                                        'one_time_guest', 'first_name', 'last_name', 'birthdate', 'grade',
+                                                        'gender', 'child_bool'
+                                            ---------------------------------------------------------------------------
+
+        People Check-Ins -> All Events and Headcounts       All Events INNER JOIN Check-In Person: Associate all check-in data with event and event period data         Event Period ID 
+
+                                            ---------------------------------------------------------------------------
+                                                DF_CI_ALL should now include: 
+                                                        'event_id', 'event_period_id', 'campus_name', 'event_name',
+                                                        'event_frequency', 'event_period_starts_at', 'event_period_ends_at',
+                                                        'event_period_regular_count', 'event_period_guest_count',
+                                                        'eventtime_id', 'eventtime_name', 'eventtime_starts_at',
+                                                        'eventtime_total_count', 'eventtime_regular_count',
+                                                        'eventtime_volunteer_count', 'eventtime_guest_count', 'headcount_id',
+                                                        'headcount_total', 'checkin_id', 'person_id', 'checked_in_at',
+                                                        'checked_out_at', 'last_checked_in_at', 'check_in_count',
+                                                        'one_time_guest', 'first_name', 'last_name', 'birthdate', 'grade',
+                                                        'gender', 'child_bool'
+                                            ---------------------------------------------------------------------------
+
+
+
+    What columns need to be processed? 
+
+
+
+
+
+    What do you want to report?
+        - # of kids each Sunday, divisible by age and service time windows (e.g. 8:30-10:00, 10:00-11:45, 11:45-13:30) for each campus
+        - # of new kids / # of the new families each Sunday 
+        - Subclass of guests, volunteer counts, and regular counts for an eventtime 
+        - Rate of families which return to church / check their child in again within 4 months (1 semester cycle of the church)
+                e.g. if a new family appears on some day, create a window function which 
+        - Compare with count of kids team volunteers across campuses 
+        - For a given event, the total child (regular) count time series in/out over the total date (pre-service all the way through post-services) [total kids traffic]
+        - Sunday data as well as non-Sunday (misc. events, like HER or ALLIN) data 
