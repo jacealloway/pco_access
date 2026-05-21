@@ -217,7 +217,7 @@ GROUPS MAPPING:
                                                         'group_name', 'member_count', 'event_id', 
                                                         'event_name', 'visitor_count', 'starts_at', 
                                                         'tag_ids
-                                            ---------------------------------------------------------------------------
+                                        ---------------------------------------------------------------------------
 
         Campus name -> Groups by Campus                     Groups by campus LEFT JOIN Campus name                                                                      Campus ID 
 
