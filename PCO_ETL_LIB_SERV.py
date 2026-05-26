@@ -32,11 +32,13 @@ except ModuleNotFoundError:
 # Set global API fetch points
 SERVICES_BASE = 'https://api.planningcenteronline.com/services/v2'
 PEOPLE_BASE = 'https://api.planningcenteronline.com/people/v2/people'
+FORMS_BASE = 'https://api.planningcenteronline.com/people/v2/forms'
 EMAIL_BASE = 'https://api.planningcenteronline.com/people/v2/emails'
 CAMPUS_BASE = 'https://api.planningcenteronline.com/people/v2/campuses'
 WORKFLOW_BASE = 'https://api.planningcenteronline.com/people/v2/workflows'
 GROUPS_BASE = 'https://api.planningcenteronline.com/groups/v2'
 CHECKINS_BASE = 'https://api.planningcenteronline.com/check-ins/v2'
+GIVING_BASE = 'https://api.planningcenteronline.com/giving/v2'
 
 
 def timeFunction(func):
@@ -114,6 +116,15 @@ def reformatTimestring(time: str) -> str:
 
     return new_string
 
+def reformatDatetime(time: str) -> str:
+    old_format = f'%Y-%m-%dT%H:%M:%SZ'
+    new_format = f'%Y-%m-%d %H:%M:%S'
+
+    old_string = datetime.strptime(time, old_format)
+    new_string = datetime.strftime(old_string, new_format)
+
+    return new_string
+
 
 def getTimeGap(time1: str, time2: str) -> str:
     """
@@ -145,7 +156,7 @@ def convertUTCEST(time: str) -> str:
         time: Output of format '%Y-%m-%dT%H:%M:%SZ' (str) with the -5/-4 hour time difference included in the input 
     """
     # Load timezone format
-    est = pytz.timezone('US/Eastern')
+    est = pytz.timezone('America/New_York')
     # Define the format of the input strings which we want to preserve 
     fmt = f'%Y-%m-%dT%H:%M:%SZ'
     formatted_time = datetime.strptime(time, fmt)
@@ -158,7 +169,7 @@ def convertUTCEST(time: str) -> str:
 def postgresUpsert(conn_url: str, dataframe: pd.DataFrame, schema: str, table_name: str) -> None:
     try:
         engine = create_engine(conn_url)
-        dataframe.to_sql(name = table_name, con = engine, schema = schema, if_exists = 'replace')
+        dataframe.to_sql(name = table_name, con = engine, schema = schema, if_exists = 'replace', index = False)
         logging.info(f'Dataframe upsert successful to table {schema}.{table_name}.')
     except Exception as e:
         logging.error(f'Error upserting dataframe.')
@@ -965,5 +976,383 @@ class Exporter():
         DF_ALL_ROSTERS.sort_values(by = ['plan_date', 'servicetype_name', 'team_name', 'person_id', 'status'])
 
         return DF_ALL_ROSTERS
+
+
+    @timeFunction 
+    def checkinsDFGenerator(self) -> object:
+        pbar = tqdm(total = 6, desc = 'Fetching check-ins API JSON')
+
+        DF_CI_EVENTS = self.parseJSON(CHECKINS_BASE + '/' + 'events')
+        pbar.update(1)
+        DF_CI_EVENTTIMES = self.parseJSON(CHECKINS_BASE + '/' + 'event_times')
+        pbar.update(1)
+        DF_CI_CAMPUSES = self.parseJSON(CHECKINS_BASE + '/' + 'campuses')
+        pbar.update(1)
+        DF_CI_PEOPLE = self.parseJSON(CHECKINS_BASE + '/' + 'people')
+        pbar.update(1)
+        DF_CI_HEADCOUNTS = self.parseJSON(CHECKINS_BASE + '/' + 'headcounts')
+        pbar.update(1)
+        DF_CI_CHECKIN_PERSON = self.parseJSON(CHECKINS_BASE + '/' + 'check_ins')
+        pbar.update(1)
+
+        pbar.close()
+
+
+        DF_CI_EVENTPERIODS = pd.DataFrame()
+        for event_id in tqdm(DF_CI_EVENTS['id'].values, "Fetching event periods for all CI events"):
+            req_url = CHECKINS_BASE + '/' + f'events/{event_id}/event_periods'
+            DF_CI_EVENTPERIODS = pd.concat([DF_CI_EVENTPERIODS, self.parseJSON(req_url)])
+
+        # Script to write campus information onto the events list 
+        DF_CI_EVENTS['campus_id'] = ''
+        for i in tqdm(range(len(DF_CI_EVENTS.index)), desc = 'Writing campus data onto events'):
+            try:
+                DF_CI_EVENTS.loc[i, 'campus_id'] = DF_CI_EVENTS['relationships.campuses.data'].values[i][0]['id'] # Indexing [0] to access a nested dict within a list
+            except Exception as e:
+                continue
+
+
+        # Filtering 
+        DF_CI_EVENTS_REFINED = DF_CI_EVENTS[['id', 'campus_id', 'attributes.name', 'attributes.frequency']]
+        DF_CI_EVENTPERIODS_REFINED = DF_CI_EVENTPERIODS[['id', 'relationships.event.data.id', 'attributes.starts_at', 'attributes.ends_at', 'attributes.regular_count', 'attributes.guest_count', 'attributes.volunteer_count']]
+        DF_CI_EVENTTIMES_REFINED = DF_CI_EVENTTIMES[['id', 'attributes.name', 'relationships.event.data.id', 'relationships.event_period.data.id', 'attributes.starts_at', 'attributes.total_count', 'attributes.regular_count', 'attributes.volunteer_count', 'attributes.guest_count']]
+        DF_CI_PEOPLE_REFINED = DF_CI_PEOPLE[['id', 'attributes.birthdate', 'attributes.gender', 'attributes.grade',  'attributes.first_name', 'attributes.last_name', 'attributes.last_checked_in_at', 'attributes.check_in_count', 'attributes.child']]
+        DF_CI_HEADCOUNTS_REFINED = DF_CI_HEADCOUNTS[['id', 'attributes.total', 'relationships.event_time.data.id']]
+        DF_CI_CHECKIN_REFINED = DF_CI_CHECKIN_PERSON[['id', 'relationships.person.data.id', 'relationships.event_period.data.id', 'attributes.created_at', 'attributes.checked_out_at', 'attributes.one_time_guest']]
+
+
+
+
+        # EXECUTE JOINS ---------------------------------------------------------------------------------------------------------------------
+        DF_CI_EVENTS_WITH_CAMPUSES = pd.merge(DF_CI_EVENTS_REFINED, DF_CI_CAMPUSES[['id', 'attributes.name']], how = 'left', left_on = 'campus_id', right_on = 'id')
+        DF_CI_EVENTS_WITH_CAMPUSES.rename(columns = {
+                'id_x' : 'id',
+                'id_y' : 'campus_id',
+                'attributes.name_x' : 'event_name',
+                'attributes.name_y' : 'campus_name',
+                'attributes.frequency' : 'event_frequency'
+        }, inplace = True)
+        DF_CI_EVENTS_WITH_CAMPUSES = DF_CI_EVENTS_WITH_CAMPUSES[['id', 'campus_id', 'campus_name', 'event_name', 'event_frequency']]
+
+
+
+        DF_CI_EVENTS_EVENT_PERIODS = pd.merge(DF_CI_EVENTS_WITH_CAMPUSES, DF_CI_EVENTPERIODS_REFINED, how = 'inner', left_on = 'id', right_on = 'relationships.event.data.id')
+        # Rename columns 
+        DF_CI_EVENTS_EVENT_PERIODS.rename(columns = {
+                'id_x' : 'event_id',
+                'id_y' : 'event_period_id',
+                'attributes.starts_at' : 'event_period_starts_at', 
+                'attributes.ends_at' : 'event_period_ends_at', 
+                'attributes.regular_count' : 'event_period_regular_count', 
+                'attributes.guest_count' : 'event_period_guest_count' 
+        }, inplace = True)
+        # Isolate the columns needed 
+        DF_CI_EVENTS_EVENT_PERIODS = DF_CI_EVENTS_EVENT_PERIODS[['event_id', 'event_period_id', 'campus_name', 'campus_id', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count']]
+        
+        
+        
+        DF_CI_EVENTS_ALL = pd.merge(DF_CI_EVENTS_EVENT_PERIODS, DF_CI_EVENTTIMES_REFINED, how = 'left', left_on = 'event_period_id', right_on = 'relationships.event_period.data.id')
+        # Rename columns 
+        DF_CI_EVENTS_ALL.rename(columns = {
+                'id' : 'eventtime_id',
+                'attributes.name' : 'eventtime_name', 
+                'attributes.starts_at' : 'eventtime_starts_at',
+                'attributes.total_count' : 'eventtime_total_count', 
+                'attributes.regular_count' : 'eventtime_regular_count', 
+                'attributes.volunteer_count' : 'eventtime_volunteer_count', 
+                'attributes.guest_count' : 'eventtime_guest_count'
+        }, inplace = True)
+        # Order and isolate the columns needed
+        DF_CI_EVENTS_ALL = DF_CI_EVENTS_ALL[['event_id', 'event_period_id', 'campus_name', 'campus_id', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count', 'eventtime_id', 'eventtime_name', 'eventtime_starts_at', 'eventtime_total_count', 'eventtime_regular_count', 'eventtime_volunteer_count', 'eventtime_guest_count']]
+
+
+        
+        DF_CI_EVENTS_HEADCOUNTS_ALL = pd.merge(DF_CI_EVENTS_ALL, DF_CI_HEADCOUNTS_REFINED, how = 'left', left_on = 'eventtime_id', right_on = 'relationships.event_time.data.id')
+        # Rename columns 
+        DF_CI_EVENTS_HEADCOUNTS_ALL.rename(columns = {
+            'id' : 'headcount_id', 
+            'attributes.total' : 'headcount_total', 
+        }, inplace = True)
+        # Isolate the columns needed 
+        DF_CI_EVENTS_HEADCOUNTS_ALL = DF_CI_EVENTS_HEADCOUNTS_ALL[['event_id', 'event_period_id', 'campus_name', 'campus_id', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count', 'eventtime_id', 'eventtime_name', 'eventtime_starts_at', 'eventtime_total_count', 'eventtime_regular_count', 'eventtime_volunteer_count', 'eventtime_guest_count', 'headcount_id', 'headcount_total']]
+
+        
+        DF_CI_CHECKIN_PERSON = pd.merge(DF_CI_CHECKIN_REFINED, DF_CI_PEOPLE_REFINED, how = 'left', left_on = 'relationships.person.data.id', right_on = 'id')
+        # Rename columns 
+        DF_CI_CHECKIN_PERSON.rename(columns = {
+            'id_x' : 'checkin_id', 
+            'id_y' : 'person_id', 
+            'relationships.event_period.data.id' : 'event_period_id', 
+            'attributes.created_at' : 'checked_in_at', 
+            'attributes.checked_out_at' : 'checked_out_at', 
+            'attributes.one_time_guest' : 'one_time_guest', 
+            'attributes.birthdate' : 'birthdate', 
+            'attributes.gender' : 'gender', 
+            'attributes.grade' : 'grade', 
+            'attributes.first_name' : 'first_name', 
+            'attributes.last_name' : 'last_name', 
+            'attributes.last_checked_in_at' : 'last_checked_in_at', 
+            'attributes.check_in_count' : 'check_in_count', 
+            'attributes.child' : 'child_bool'
+        }, inplace = True)
+        # Isolate and order the needed columns 
+        DF_CI_CHECKIN_PERSON = DF_CI_CHECKIN_PERSON[['checkin_id', 'person_id', 'event_period_id', 'checked_in_at', 'checked_out_at', 'last_checked_in_at', 'check_in_count', 'one_time_guest', 'first_name', 'last_name', 'birthdate', 'gender', 'child_bool']]
+
+        
+        # Final master join here; no more renaming required since column names are all unique 
+        DF_CI_ALL = pd.merge(DF_CI_CHECKIN_PERSON, DF_CI_EVENTS_HEADCOUNTS_ALL, how = 'inner', left_on = 'event_period_id', right_on = 'event_period_id')
+
+
+
+        # PROCESS ALL DATES
+        DF_CI_ALL['event_period_week_end'] = ''
+        for i in tqdm(range(len(DF_CI_ALL)), 'Processing check-in datetimes'):
+            try:
+                DF_CI_ALL.loc[i, 'checked_in_at'] = reformatDatetime(convertUTCEST(DF_CI_ALL['checked_in_at'].values[i]))
+            except:
+                DF_CI_ALL.loc[i, 'checked_in_at'] = ''
+                pass 
+
+            try:
+                DF_CI_ALL.loc[i, 'checked_out_at'] = reformatDatetime(convertUTCEST(DF_CI_ALL['checked_out_at'].values[i]))
+            except:
+                DF_CI_ALL.loc[i, 'checked_out_at'] = ''
+                pass
+
+            try:
+                DF_CI_ALL.loc[i, 'last_checked_in_at'] = reformatDatetime(convertUTCEST(DF_CI_ALL['last_checked_in_at'].values[i]))
+            except:
+                DF_CI_ALL.loc[i, 'last_checked_in_at'] = ''
+                pass
+
+            try:
+                DF_CI_ALL.loc[i, 'event_period_starts_at'] = reformatDatetime(convertUTCEST(DF_CI_ALL['event_period_starts_at'].values[i]))
+            except:
+                DF_CI_ALL.loc[i, 'event_period_starts_at'] = ''
+                pass
+
+            try:
+                DF_CI_ALL.loc[i, 'event_period_week_end'] = weekEndSunday(reformatTimestring(convertUTCEST(DF_CI_ALL['event_period_ends_at'].values[i])))
+                DF_CI_ALL.loc[i, 'event_period_ends_at'] = reformatDatetime(convertUTCEST(DF_CI_ALL['event_period_ends_at'].values[i]))
+            except:
+                DF_CI_ALL.loc[i, 'event_period_week_end'] = ''
+                DF_CI_ALL.loc[i, 'event_period_ends_at'] = ''
+                pass
+
+            try:
+                DF_CI_ALL.loc[i, 'eventtime_starts_at'] = reformatDatetime(convertUTCEST(DF_CI_ALL['eventtime_starts_at'].values[i]))
+            except:
+                DF_CI_ALL.loc[i, 'eventtime_starts_at'] = ''
+                pass
+
+        return DF_CI_ALL[[
+            'campus_name', 
+            'event_name',
+            'event_frequency',
+            'event_period_starts_at',	
+            'event_period_ends_at',
+            'event_period_week_end',	
+            'event_period_regular_count',	
+            'event_period_guest_count',	
+            'eventtime_name',
+            'eventtime_starts_at',
+            'eventtime_total_count',
+            'eventtime_regular_count',
+            'eventtime_volunteer_count',
+            'eventtime_guest_count',
+            'headcount_total',
+            'first_name', 
+            'last_name', 
+            'birthdate', 
+            'gender', 
+            'child_bool', 
+            'check_in_count', 
+            'one_time_guest',
+            'checked_in_at', 
+            'checked_out_at', 
+            'last_checked_in_at', 
+            'checkin_id', 
+            'person_id', 
+            'event_period_id', 
+            'event_id', 
+            'eventtime_id', 
+            'headcount_id', 
+            'campus_id'
+            ]]
+
+
+    @timeFunction
+    def peopleactivityDFGenerator(self) -> object:
+        # PEOPLE = self.parseJSON(PEOPLE_BASE)
+        PEOPLE = pd.read_csv('TEMP_FILES/PEOPLE.csv')
+        FORMS = self.parseJSON(FORMS_BASE)
+        
+        PEOPLE_REFINED = PEOPLE[['id', 'attributes.first_name', 'attributes.last_name', 'attributes.birthdate', 'attributes.gender', 'attributes.created_at', 'attributes.updated_at']]
+        FORMS_REFINED = FORMS[['id', 'attributes.name']]
+
+        ALL_ACCOUNT_HISTORY = pd.DataFrame()
+
+        for i in tqdm(range(len(PEOPLE_REFINED)), desc = 'Fetching all people history'):
+            person_id = PEOPLE_REFINED['id'].values[i]
+
+            # Fetch and process all of the data endpoints for each person_id
+            try:
+                WORKFLOW_CARDS = self.parseJSON(PEOPLE_BASE + f'/{person_id}/workflow_cards')
+                WORKFLOW_CARDS_COMPLETED = WORKFLOW_CARDS[['id', 'attributes.completed_at']]
+                WORKFLOW_CARDS_CREATED = WORKFLOW_CARDS[['id', 'attributes.created_at']]
+            except KeyError:
+                WORKFLOW_CARDS_COMPLETED = pd.DataFrame(columns = ['id', 'attributes.completed_at'])
+                WORKFLOW_CARDS_CREATED = pd.DataFrame(columns = ['id', 'attributes.created_at'])
+
+            try:
+                GROUPS = self.parseJSON(GROUPS_BASE + f'/people/{person_id}/memberships')
+                GROUPS_REFINED = GROUPS[['relationships.group.data.id', 'attributes.joined_at']]
+            except KeyError:
+                GROUPS_REFINED = pd.DataFrame(columns = ['relationships.group.data.id', 'attributes.joined_at'])
+
+            try:
+                GROUP_EVENTS = self.parseJSON(GROUPS_BASE + f'/people/{person_id}/events')
+                GROUP_EVENTS_REFINED = GROUP_EVENTS[['relationships.event.data.id', 'attributes.starts_at']]
+            except KeyError:
+                GROUP_EVENTS_REFINED = pd.DataFrame(columns = ['relationships.event.data.id', 'attributes.starts_at'])
+
+            try:
+                FORM_SUBMISSIONS = self.parseJSON(PEOPLE_BASE + f'/{person_id}/form_submissions')
+                FORMS_SUBMITED_REFINED = FORM_SUBMISSIONS[['relationships.form.data.id', 'attributes.created_at']]
+                FORMS_SUBMITTED_WITH_NAMES = pd.merge(FORMS_SUBMITED_REFINED, FORMS_REFINED, how = 'left', left_on = 'relationships.form.data.id', right_on = 'id')
+                FORMS_SUBMITTED_WITH_NAMES = FORMS_SUBMITTED_WITH_NAMES[['attributes.name', 'attributes.created_at']]
+            except KeyError:
+                FORMS_SUBMITTED_WITH_NAMES = pd.DataFrame(columns = ['attributes.name', 'attributes.created_at'])
+
+            try:
+                GIVING = self.parseJSON(GIVING_BASE + f'/people/{person_id}/donations')
+                GIVING_REFINED = GIVING[['id', 'attributes.completed_at']]
+            except KeyError:
+                GIVING_REFINED = pd.DataFrame(columns = ['id', 'attributes.completed_at'])
+
+            try:
+                 CHECKINS = self.parseJSON(CHECKINS_BASE + f'/people/{person_id}/check_ins')
+                 CHECKINS_REFINED = CHECKINS[['id', 'attributes.created_at']]
+            except KeyError:
+                 CHECKINS_REFINED = pd.DataFrame(columns = ['id', 'attributes.created_at'])
+            
+
+            try:
+                TEAMS = self.parseJSON(SERVICES_BASE + f'/people/{person_id}/teams')
+                TEAMS_REFINED = TEAMS[['id', 'attributes.created_at']]
+            except KeyError:
+                TEAMS_REFINED = pd.DataFrame(columns = ['id', 'attributes.created_at'])
+
+            try:
+                ROSTERS = self.parseJSON(SERVICES_BASE + f'/people/{person_id}/plan_person')
+                ROSTERS_SCHEDULING = ROSTERS[['id', 'attributes.created_at']]
+                ROSTERS_CONFIRMING = ROSTERS[['id', 'attributes.status_updated_at']]
+            except KeyError:
+                ROSTERS_SCHEDULING = pd.DataFrame(columns = ['id', 'attributes.created_at'])
+                ROSTERS_CONFIRMING = pd.DataFrame(columns = ['id', 'attributes.status_updated_at'])
+
+
+            
+            # Rename and format all dataframes with event descriptions
+            WORKFLOW_CARDS_COMPLETED.rename(columns = {
+                'id' : 'card_id', 
+                'attributes.completed_at' : 'timestamp'
+            }, inplace = True)
+            WORKFLOW_CARDS_COMPLETED['description'] = 'Workflow Card Completed'
+            
+            WORKFLOW_CARDS_CREATED.rename(columns = {
+                'id' : 'card_id', 
+                'attributes.created_at' : 'timestamp'
+            }, inplace = True)
+            WORKFLOW_CARDS_CREATED['description'] = 'Workflow Card Created'
+
+            GROUPS_REFINED.rename(columns = {
+                'relationships.group.data.id' : 'group_id', 
+                'attributes.joined_at' : 'timestamp'
+            }, inplace = True)
+            GROUPS_REFINED['description'] = 'Group Joined'
+
+            GROUP_EVENTS_REFINED.rename(columns = {
+                'relationships.event.data.id' : 'event_id', 
+                'attributes.starts_at' : 'timestamp'
+            }, inplace = True)
+            GROUP_EVENTS_REFINED['description'] = 'Group Event'
+
+            FORMS_SUBMITTED_WITH_NAMES.rename(columns = {
+                'attributes.name' : 'form_name', 
+                'attributes.created_at' : 'timestamp'
+            }, inplace = True)
+            FORMS_SUBMITTED_WITH_NAMES['description'] = 'Form Submitted'
+
+            GIVING_REFINED.rename(columns = {
+                'id' : 'donation_id', 
+                'attributes.completed_at' : 'timestamp'
+            }, inplace = True)
+            GIVING_REFINED['description'] = 'Donation Made on PCO'
+
+            CHECKINS_REFINED.rename(columns = {
+                'id' : 'checkin_id', 
+                'attributes.created_at' : 'timestamp'
+            }, inplace = True)
+            CHECKINS_REFINED['description'] = 'Checked In to Event'
+
+            TEAMS_REFINED.rename(columns = {
+                'id' : 'team_id', 
+                'attributes.created_at' : 'timestamp'
+            }, inplace = True)
+            TEAMS_REFINED['description'] = 'Joined Team'
+
+            ROSTERS_SCHEDULING.rename(columns = {
+                'id' : 'roster_id', 
+                'attributes.created_at' : 'timestamp'
+            }, inplace = True)
+            ROSTERS_SCHEDULING['description'] = 'Scheduled on Roster'
+
+            ROSTERS_CONFIRMING.rename(columns = {
+                'id' : 'roster_id', 
+                'attributes.status_updated_at' : 'timestamp'
+            }, inplace = True)
+            ROSTERS_CONFIRMING['description'] = 'Roster Status Updated'
+
+
+            ACTIVITY = pd.concat([WORKFLOW_CARDS_COMPLETED, 
+                                  WORKFLOW_CARDS_CREATED, 
+                                  GROUPS_REFINED, 
+                                  GROUP_EVENTS_REFINED, 
+                                  FORMS_SUBMITTED_WITH_NAMES, 
+                                  GIVING_REFINED, 
+                                  CHECKINS_REFINED, 
+                                  TEAMS_REFINED, 
+                                  ROSTERS_SCHEDULING, 
+                                  ROSTERS_CONFIRMING
+                                  ], ignore_index = True)
+            ACTIVITY['person_id'] = person_id
+            
+            ACTIVITY.sort_values(by = 'timestamp', inplace = True)
+            ACTIVITY.dropna(subset = 'timestamp', inplace = True)
+
+            ACTIVITY = ACTIVITY[['person_id', 'description', 'timestamp', 'group_id', 'event_id', 'form_name', 'donation_id', 'checkin_id', 'team_id', 'roster_id']]
+            
+            for j in range(len(ACTIVITY)):
+                try:
+                    ACTIVITY['timestamp'].values[j] = reformatTimestring(convertUTCEST(ACTIVITY['timestamp'].values[j]))
+                except:
+                    ACTIVITY['timestamp'].values[j] = ''
+
+            ALL_ACCOUNT_HISTORY = pd.concat([ALL_ACCOUNT_HISTORY, ACTIVITY], ignore_index = True)
+
+
+        return ALL_ACCOUNT_HISTORY[[
+            'person_id', 
+            'description', 
+            'timestamp', 
+            'group_id', 
+            'event_id', 
+            'form_name', 
+            'donation_id', 
+            'checkin_id', 
+            'team_id', 
+            'roster_id'
+        ]] 
 
 
