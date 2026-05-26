@@ -27,7 +27,7 @@ if __name__ == "__main__":
     # GET ALL DATA
     _ENGINE_ = Exporter(api_app_id = API_APP_ID, api_secret = API_SECRET)
 
-    PPL_DF = _ENGINE_.peopleactivityDFGenerator()
-    PPL_DF.to_csv('TEMP_FILES/PPL_HIST.csv')
+    PPL_DF = _ENGINE_.rosterDFGenerator()
+    PPL_DF.to_csv('TEMP_FILES/rosters_test.csv')
 
 
