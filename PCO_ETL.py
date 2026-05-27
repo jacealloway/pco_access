@@ -4,9 +4,20 @@
 ### CODE VERSION: 4 - LOCAL/SERVER
 ###         See GitHub commit history for the description of updates.
 
+#Set environment: LOCAL / SERVER
+runpoint = 'SERVER'
+if runpoint == 'LOCAL':
+    log_dir = 'LOG/'
+    api_dir = 'apikey/'
+if runpoint == 'SERVER':
+    log_dir = 'User/pco_access/LOG/'
+    api_dir = 'User/pco_access/apikey/'
+else:
+    sys.exit()
+
 # Import packages 
 try:
-    import PCO_ETL_LIB_SERV as ETL_LIB
+    import PCO_ETL_LIB as ETL_LIB
     import numpy as np 
     from datetime import datetime
     import sys 
@@ -14,7 +25,7 @@ try:
     import logging
     from gc import collect
 
-    logging.basicConfig(filename = 'User/pco_access/LOG/PCO_ETL_log.txt', 
+    logging.basicConfig(filename = log_dir + 'PCO_ETL_log.txt', 
                     filemode='w',
                     level = logging.INFO, 
                     format = '%(asctime)s - %(levelname)s - %(message)s'
@@ -28,7 +39,7 @@ except ModuleNotFoundError:
 if __name__ == "__main__": 
     # Try to load planning centre API URL
     try:
-        SECRET = np.loadtxt(f'User/pco_access/apikey/keys.txt', dtype = str)   
+        SECRET = np.loadtxt(api_dir + f'keys.txt', dtype = str)   
         API_APP_ID = f"{SECRET[0]}"     
         API_SECRET = f"{SECRET[1]}"   
     except FileNotFoundError:
@@ -41,7 +52,7 @@ if __name__ == "__main__":
     # Load scopes and service account information from api key
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive']
-    SERVICE_ACCOUNT_JSON = f'/User/pco_access/apikey/service_account.json'
+    SERVICE_ACCOUNT_JSON = api_dir + f'service_account.json'
     SPREADSHEET_ID = f"{SECRET[2]}" 
     # Generate the API push engine 
     _UPLOAD_ = ETL_LIB.GoogleAPIPush(SCOPES = SCOPES, SERVICE_ACCOUNT_JSON = SERVICE_ACCOUNT_JSON, SPREADSHEET_ID = SPREADSHEET_ID)
