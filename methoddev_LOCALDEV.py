@@ -39,7 +39,7 @@ if __name__ == "__main__":
     # GET ALL DATA
     _ENGINE_ = Exporter(api_app_id = API_APP_ID, api_secret = API_SECRET)
 
-    PPL_DF = _ENGINE_.peopleactivityDFGenerator()
-    PPL_DF.to_csv('TEMP_FILES/people_activity_test.csv', index = False)
+    PPL_DF = _ENGINE_.checkinsDFGenerator()
+    PPL_DF.to_csv('TEMP_FILES/checkins_test.csv', index = False)
 
 

@@ -198,12 +198,20 @@ def convertUTCEST(time: str) -> str:
 
 
 def postgresUpsert(conn_url: str, dataframe: pd.DataFrame, schema: str, table_name: str) -> None:
+    engine = create_engine(conn_url, pool_pre_ping = True)
+
     try:
-        engine = create_engine(conn_url)
-        dataframe.to_sql(name = table_name, con = engine, schema = schema, if_exists = 'replace', index = False)
-        logging.info(f'Dataframe upsert successful.')
+        with engine.begin() as conn:
+            dataframe.to_sql(name = table_name, 
+                            con = conn, 
+                            schema = schema, 
+                            if_exists = 'replace', 
+                            index = False, 
+                            method = 'multi', 
+                            batch_size = 1000)
+            logging.info(f'Dataframe upsert successful ({len(dataframe)} rows).')
     except Exception as e:
-        logging.error(f'Error upserting dataframe.')
+        logging.error(f'Error upserting dataframe: {e}.')
 
 
 
@@ -653,13 +661,13 @@ class Exporter():
             pbar = tqdm(total = 5, desc = 'Fetching groups API JSON')
             DF_GROUPTYPE = self.parseJSON(GROUPS_BASE+'/'+'group_types')
             pbar.update(1)
-            DF_EVENTS = self.parseJSON(GROUPS_BASE + '/' + 'events')
+            DF_EVENTS = self.parseJSON(GROUPS_BASE + '/' + 'events' + '?per_page=100')
             pbar.update(1)
-            DF_GROUPS_PEOPLE = self.parseJSON(GROUPS_BASE + '/' + 'people')
+            DF_GROUPS_PEOPLE = self.parseJSON(GROUPS_BASE + '/' + 'people' + '?per_page=100')
             pbar.update(1)
             DF_CAMPUSES = self.parseJSON(GROUPS_BASE + '/' + 'campuses')
             pbar.update(1)
-            DF_GROUPS = self.parseJSON(GROUPS_BASE + '/' + 'groups')
+            DF_GROUPS = self.parseJSON(GROUPS_BASE + '/' + 'groups' + '?per_page=100')
             pbar.update(1)
             pbar.close()
             logging.info('Groups primary API fetch successful.')
@@ -773,8 +781,6 @@ class Exporter():
 
 
         # FINAL DATAFRAME PROCESSING -------------------------------------------------------------------------------------------------------------------
-        # Drop all columns where group_id is null
-        # DF_GROUPS_ALL.dropna(subset = 'group_id', inplace = True)
         DF_GROUPS_ALL['visitor_count'] = DF_GROUPS_ALL['visitor_count'].fillna(0)
         DF_GROUPS_ALL['group_archived_at'] = DF_GROUPS_ALL['group_archived_at'].astype(str)
 
@@ -1012,19 +1018,17 @@ class Exporter():
     @timeFunction 
     def checkinsDFGenerator(self) -> object:
         try:
-            pbar = tqdm(total = 6, desc = 'Fetching check-ins API JSON')
+            pbar = tqdm(total = 5, desc = 'Fetching check-ins API JSON')
 
-            DF_CI_EVENTS = self.parseJSON(CHECKINS_BASE + '/' + 'events')
+            DF_CI_EVENTS = self.parseJSON(CHECKINS_BASE + '/' + 'events' + '?per_page=100')
             pbar.update(1)
-            DF_CI_EVENTTIMES = self.parseJSON(CHECKINS_BASE + '/' + 'event_times')
+            DF_CI_EVENTTIMES = self.parseJSON(CHECKINS_BASE + '/' + 'event_times' + '?per_page=100')
             pbar.update(1)
             DF_CI_CAMPUSES = self.parseJSON(CHECKINS_BASE + '/' + 'campuses')
             pbar.update(1)
-            DF_CI_PEOPLE = self.parseJSON(CHECKINS_BASE + '/' + 'people')
+            DF_CI_PEOPLE = self.parseJSON(CHECKINS_BASE + '/' + 'people' + '?per_page=100')
             pbar.update(1)
-            DF_CI_HEADCOUNTS = self.parseJSON(CHECKINS_BASE + '/' + 'headcounts')
-            pbar.update(1)
-            DF_CI_CHECKIN_PERSON = self.parseJSON(CHECKINS_BASE + '/' + 'check_ins')
+            DF_CI_CHECKIN_PERSON = self.parseJSON(CHECKINS_BASE + '/' + 'check_ins' + '?per_page=100')
             pbar.update(1)
 
             pbar.close()
@@ -1052,17 +1056,13 @@ class Exporter():
         DF_CI_EVENTPERIODS_REFINED = DF_CI_EVENTPERIODS[['id', 'relationships.event.data.id', 'attributes.starts_at', 'attributes.ends_at', 'attributes.regular_count', 'attributes.guest_count', 'attributes.volunteer_count']]
         DF_CI_EVENTTIMES_REFINED = DF_CI_EVENTTIMES[['id', 'attributes.name', 'relationships.event.data.id', 'relationships.event_period.data.id', 'attributes.starts_at', 'attributes.total_count', 'attributes.regular_count', 'attributes.volunteer_count', 'attributes.guest_count']]
         DF_CI_PEOPLE_REFINED = DF_CI_PEOPLE[['id', 'attributes.birthdate', 'attributes.gender', 'attributes.grade',  'attributes.first_name', 'attributes.last_name', 'attributes.last_checked_in_at', 'attributes.check_in_count', 'attributes.child']]
-        DF_CI_HEADCOUNTS_REFINED = DF_CI_HEADCOUNTS[['id', 'attributes.total', 'relationships.event_time.data.id']]
         DF_CI_CHECKIN_REFINED = DF_CI_CHECKIN_PERSON[['id', 'relationships.person.data.id', 'relationships.event_period.data.id', 'attributes.created_at', 'attributes.checked_out_at', 'attributes.one_time_guest']]
-
-
 
 
         # EXECUTE JOINS ---------------------------------------------------------------------------------------------------------------------
         DF_CI_EVENTS_WITH_CAMPUSES = pd.merge(DF_CI_EVENTS_REFINED, DF_CI_CAMPUSES[['id', 'attributes.name']], how = 'left', left_on = 'campus_id', right_on = 'id')
         DF_CI_EVENTS_WITH_CAMPUSES.rename(columns = {
                 'id_x' : 'id',
-                'id_y' : 'campus_id',
                 'attributes.name_x' : 'event_name',
                 'attributes.name_y' : 'campus_name',
                 'attributes.frequency' : 'event_frequency'
@@ -1100,17 +1100,6 @@ class Exporter():
         # Order and isolate the columns needed
         DF_CI_EVENTS_ALL = DF_CI_EVENTS_ALL[['event_id', 'event_period_id', 'campus_name', 'campus_id', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count', 'eventtime_id', 'eventtime_name', 'eventtime_starts_at', 'eventtime_total_count', 'eventtime_regular_count', 'eventtime_volunteer_count', 'eventtime_guest_count']]
 
-
-        
-        DF_CI_EVENTS_HEADCOUNTS_ALL = pd.merge(DF_CI_EVENTS_ALL, DF_CI_HEADCOUNTS_REFINED, how = 'left', left_on = 'eventtime_id', right_on = 'relationships.event_time.data.id')
-        # Rename columns 
-        DF_CI_EVENTS_HEADCOUNTS_ALL.rename(columns = {
-            'id' : 'headcount_id', 
-            'attributes.total' : 'headcount_total', 
-        }, inplace = True)
-        # Isolate the columns needed 
-        DF_CI_EVENTS_HEADCOUNTS_ALL = DF_CI_EVENTS_HEADCOUNTS_ALL[['event_id', 'event_period_id', 'campus_name', 'campus_id', 'event_name', 'event_frequency', 'event_period_starts_at', 'event_period_ends_at', 'event_period_regular_count', 'event_period_guest_count', 'eventtime_id', 'eventtime_name', 'eventtime_starts_at', 'eventtime_total_count', 'eventtime_regular_count', 'eventtime_volunteer_count', 'eventtime_guest_count', 'headcount_id', 'headcount_total']]
-
         
         DF_CI_CHECKIN_PERSON = pd.merge(DF_CI_CHECKIN_REFINED, DF_CI_PEOPLE_REFINED, how = 'left', left_on = 'relationships.person.data.id', right_on = 'id')
         # Rename columns 
@@ -1135,9 +1124,10 @@ class Exporter():
 
         
         # Final master join here; no more renaming required since column names are all unique 
-        DF_CI_ALL = pd.merge(DF_CI_CHECKIN_PERSON, DF_CI_EVENTS_HEADCOUNTS_ALL, how = 'inner', left_on = 'event_period_id', right_on = 'event_period_id')
+        DF_CI_ALL = pd.merge(DF_CI_CHECKIN_PERSON, DF_CI_EVENTS_ALL, how = 'inner', left_on = 'event_period_id', right_on = 'event_period_id')
 
-
+        # Employ uniqueness for primary keys
+        DF_CI_ALL.drop_duplicates(subset = ['eventtime_id', 'checkin_id'], inplace = True, keep = 'first')
 
         # PROCESS ALL DATES
         DF_CI_ALL['event_period_week_end'] = ''
@@ -1180,6 +1170,7 @@ class Exporter():
                 DF_CI_ALL.loc[i, 'eventtime_starts_at'] = ''
                 pass
 
+
         return DF_CI_ALL[[
             'campus_name', 
             'event_name',
@@ -1195,7 +1186,6 @@ class Exporter():
             'eventtime_regular_count',
             'eventtime_volunteer_count',
             'eventtime_guest_count',
-            'headcount_total',
             'first_name', 
             'last_name', 
             'birthdate', 
@@ -1211,7 +1201,6 @@ class Exporter():
             'event_period_id', 
             'event_id', 
             'eventtime_id', 
-            'headcount_id', 
             'campus_id'
             ]]
     

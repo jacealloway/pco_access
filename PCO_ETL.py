@@ -82,44 +82,4 @@ if __name__ == "__main__":
     try:
         DF_ROSTERS = _ENGINE_.rosterDFGenerator()
         ETL_LIB.postgresUpsert(conn_url = server_conn_url, dataframe = DF_ROSTERS, schema = 'public', table_name = 'rosters')
-        ETL_LIB.dataframeCycle(dataframe = DF_ROSTERS, upload_engine = _UPLOAD_, sheet_name = 'planrosters')
-        del DF_ROSTERS 
-        collect()
-    except Exception:
-        logging.error(f"fetchError extracting roster data for DF_ROSTERS.")
-    
-    # EXTRACT GROUP DATA -> PUSH TO POSTGRES AND GOOGLE
-    try:
-        DF_GROUPS = _ENGINE_.groupDFGenerator()
-        ETL_LIB.postgresUpsert(conn_url = server_conn_url, dataframe = DF_GROUPS, schema = 'public', table_name = 'groups')
-        ETL_LIB.dataframeCycle(dataframe = DF_GROUPS, upload_engine = _UPLOAD_, sheet_name = 'groups')
-        del DF_GROUPS 
-        collect()
-    except Exception:
-        logging.error(f"fetchError extracting group data for DF_GROUPS.")
-
-    # EXTRACT CHECK-INS DATA -> PUSH TO POSTGRES AND GOOGLE
-    try:
-        DF_CHECKINS = _ENGINE_.checkinDFGenerator()
-        ETL_LIB.postgresUpsert(conn_url = server_conn_url, dataframe = DF_CHECKINS, schema = 'public', table_name = 'checkins')
-        ETL_LIB.dataframeCycle(dataframe = DF_CHECKINS, upload_engine = _UPLOAD_, sheet_name = 'kids')
-        del DF_CHECKINS
-        collect()
-    except Exception:
-        logging.error(f"fetchError extracting check-in data for DF_CHECKINS.")
-
-    
-    # EXTRACT ALL PEOPLE ACTIVITY -> PUSH TO POSTGRES
-    try:
-        DF_PEOPLE_ACTIVITY = _ENGINE_.peopleactivityDFGenerator()
-        ETL_LIB.postgresUpsert(conn_url = server_conn_url, dataframe = DF_PEOPLE_ACTIVITY, schema = 'public', table_name = 'people_activity')
-
-        del DF_PEOPLE_ACTIVITY
-        collect()
-    except Exception:
-        logging.error(f"fetchError extracting people activity data for DF_PEOPLE_ACTIVITY.")
-
-
-    end_time = time.time()
-    elapsed = end_time - start_time
-    logging.info(f"API fetched and processed in {elapsed:.2f} seconds / {(elapsed/60):.2f} minutes.")
+        ETL_LIB.dataframeCycle(dataframe = DF_ROSTERS, upload_en
