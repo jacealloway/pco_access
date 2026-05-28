@@ -208,7 +208,7 @@ def postgresUpsert(conn_url: str, dataframe: pd.DataFrame, schema: str, table_na
                             if_exists = 'replace', 
                             index = False, 
                             method = 'multi', 
-                            batch_size = 1000)
+                            chunksize = 1000)
             logging.info(f'Dataframe upsert successful ({len(dataframe)} rows).')
     except Exception as e:
         logging.error(f'Error upserting dataframe: {e}.')
@@ -1414,12 +1414,6 @@ class Exporter():
                                      'roster_id']]
 
 
-                # Create unique keys associated with each person and timestamp
-                for j in range(len(ACTIVITY)):
-                    ACTIVITY['unix_key'].values[j] = f"{int(datetime.strptime(ACTIVITY['date'].values[j], '%Y-%m-%dT%H:%M:%SZ').timestamp())}{person_id}"
-                    ACTIVITY['date'].values[j] = reformatTimestring(convertUTCEST(ACTIVITY['date'].values[j]))
-
-
             except Exception as e:
                 logging.error(f'Error fetching data for person_id {person_id}: {e}. Skipping to next person.')
                 continue
@@ -1429,19 +1423,25 @@ class Exporter():
 
 
 
+        # Create unique keys associated with each person and timestamp
+        for j in tqdm(range(len(ALL_ACCOUNT_HISTORY)), 'Processing activity datetimes and creating unique keys'):
+            ALL_ACCOUNT_HISTORY.loc[j, 'unix_key'] = f"{int(datetime.strptime(ALL_ACCOUNT_HISTORY['date'].values[j], f'%Y-%m-%dT%H:%M:%SZ').timestamp())}{person_id}"
+            ALL_ACCOUNT_HISTORY.loc[j, 'date'] = reformatTimestring(convertUTCEST(ALL_ACCOUNT_HISTORY['date'].values[j]))
+
+
         return ALL_ACCOUNT_HISTORY[[
-            'unix_key',
-            'description', 
-            'date', 
-            'person_id', 
-            'first_name',
-            'last_name',
-            'card_id',
-            'group_id', 
-            'event_id', 
-            'donation_id', 
-            # 'checkin_id', 
-            'team_id', 
-            'roster_id',
-            # 'form_name',
-        ]]
+                    'unix_key',
+                    'description', 
+                    'date', 
+                    'person_id', 
+                    'first_name',
+                    'last_name',
+                    'card_id',
+                    'group_id', 
+                    'event_id', 
+                    'donation_id', 
+                    # 'checkin_id', 
+                    'team_id', 
+                    'roster_id',
+                    # 'form_name',
+                    ]]
